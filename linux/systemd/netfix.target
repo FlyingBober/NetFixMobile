@@ -1,0 +1,7 @@
+[Unit]
+Description=NetFix Headless Services
+Wants=netfix-dpi.service netfix-tgproxy.service
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target
