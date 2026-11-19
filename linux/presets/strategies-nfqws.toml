@@ -1,0 +1,62 @@
+# Curated zapret nfqws strategies for Linux NetFix
+# Note: --qnum and --dpi-desync-fwmark are pinned at runtime by netfix-core::dpi.
+
+[[strategy]]
+name = "nfqws-fake-multisplit-badseq"
+category = "general"
+description = "Fake + multisplit at SNI/midsld with badseq fooling and QUIC fake"
+args = "--filter-tcp=80,443 --dpi-desync=fake,multisplit --dpi-desync-split-pos=1,midsld --dpi-desync-repeats=6 --dpi-desync-fooling=badseq --new --filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=6"
+
+[[strategy]]
+name = "nfqws-fake-multisplit-md5sig"
+category = "general"
+description = "Fake + multisplit with md5sig fooling and QUIC fake"
+args = "--filter-tcp=80,443 --dpi-desync=fake,multisplit --dpi-desync-split-pos=1,midsld --dpi-desync-repeats=6 --dpi-desync-fooling=md5sig --new --filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=6"
+
+[[strategy]]
+name = "nfqws-fake-multisplit-badsum"
+category = "general"
+description = "Fake + multisplit with badsum fooling and QUIC fake"
+args = "--filter-tcp=80,443 --dpi-desync=fake,multisplit --dpi-desync-split-pos=midsld --dpi-desync-repeats=6 --dpi-desync-fooling=badsum --new --filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=6"
+
+[[strategy]]
+name = "nfqws-fake-badsum"
+category = "general"
+description = "Fake packet injection with badsum fooling"
+args = "--filter-tcp=80,443 --dpi-desync=fake --dpi-desync-fooling=badsum --dpi-desync-repeats=6 --new --filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=6"
+
+[[strategy]]
+name = "nfqws-disorder2-midsld"
+category = "general"
+description = "TCP disorder2 splitting at SNI/midsld without fake packets"
+args = "--filter-tcp=80,443 --dpi-desync=disorder2 --dpi-desync-split-pos=1,midsld --new --filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=6"
+
+[[strategy]]
+name = "nfqws-fake-disorder2-badseq"
+category = "general"
+description = "Fake + disorder2 with badseq fooling"
+args = "--filter-tcp=80,443 --dpi-desync=fake,disorder2 --dpi-desync-split-pos=1,midsld --dpi-desync-repeats=6 --dpi-desync-fooling=badseq --new --filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=6"
+
+[[strategy]]
+name = "nfqws-multisplit-seqovl"
+category = "youtube"
+description = "Multisplit with sequence overlap for TLS ClientHello"
+args = "--filter-tcp=443 --dpi-desync=multisplit --dpi-desync-split-seqovl=652 --dpi-desync-split-pos=2 --new --filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=8"
+
+[[strategy]]
+name = "nfqws-fake-autottl"
+category = "general"
+description = "Fake with auto-TTL estimation and md5sig fooling"
+args = "--filter-tcp=80,443 --dpi-desync=fake,multisplit --dpi-desync-autottl=2 --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=md5sig,badseq --new --filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=6"
+
+[[strategy]]
+name = "nfqws-fake-fakedsplit-ts"
+category = "discord"
+description = "Fakedsplit with timestamp fooling and UDP fake for Discord voice/QUIC"
+args = "--filter-tcp=80,443 --dpi-desync=fakedsplit --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=ts --dpi-desync-repeats=6 --new --filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=8"
+
+[[strategy]]
+name = "nfqws-quic-fake-only"
+category = "quic"
+description = "QUIC/UDP 443 fake burst paired with TCP split2"
+args = "--filter-tcp=80,443 --dpi-desync=split2 --dpi-desync-split-pos=1,midsld --new --filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=11"

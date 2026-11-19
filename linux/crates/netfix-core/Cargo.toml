@@ -1,0 +1,28 @@
+[package]
+name = "netfix-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+serde_json = "1"
+thiserror = "2"
+rand = "0.8"
+hex = "0.4"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "socks"] }
+shell-words = "1"
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
+libc = "0.2"
+tgwsproxy = { path = "../../../native/tgproxy-rust" }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pki-types = "1"
+webpki-roots = "0.26"
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3"
