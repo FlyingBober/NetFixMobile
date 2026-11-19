@@ -91,6 +91,24 @@ static TLS_CONFIG: Lazy<Arc<ClientConfig>> = Lazy::new(|| {
     Arc::new(cfg)
 });
 
+static TLS_CONFIG_VERIFIED: Lazy<Arc<ClientConfig>> = Lazy::new(|| {
+    let root_store =
+        rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let mut cfg = ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    cfg.resumption = rustls::client::Resumption::in_memory_sessions(100);
+    Arc::new(cfg)
+});
+
+fn select_tls_config(domain: &str) -> Arc<ClientConfig> {
+    if TLS_VERIFY.load(Ordering::Relaxed) && domain.parse::<IpAddr>().is_err() {
+        TLS_CONFIG_VERIFIED.clone()
+    } else {
+        TLS_CONFIG.clone()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // WsHandshakeError
 // ---------------------------------------------------------------------------
@@ -543,7 +561,7 @@ pub async fn ws_connect_once(
     };
     set_sock_opts(&raw_conn);
 
-    let connector = TlsConnector::from(TLS_CONFIG.clone());
+    let connector = TlsConnector::from(select_tls_config(domain));
     let sni = server_name(domain);
 
     let handshake_timeout = ws_handshake_timeout(timeout);
@@ -743,4 +761,24 @@ pub async fn connect_one_ws(ip: &str, domains: &[String]) -> Option<RawWebSocket
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_select_tls_config_respects_tls_verify_and_ip_check() {
+        let prev = TLS_VERIFY.load(Ordering::Relaxed);
+
+        TLS_VERIFY.store(false, Ordering::Relaxed);
+        assert!(Arc::ptr_eq(&select_tls_config("example.com"), &TLS_CONFIG));
+        assert!(Arc::ptr_eq(&select_tls_config("1.1.1.1"), &TLS_CONFIG));
+
+        TLS_VERIFY.store(true, Ordering::Relaxed);
+        assert!(Arc::ptr_eq(&select_tls_config("example.com"), &TLS_CONFIG_VERIFIED));
+        assert!(Arc::ptr_eq(&select_tls_config("1.1.1.1"), &TLS_CONFIG));
+
+        TLS_VERIFY.store(prev, Ordering::Relaxed);
+    }
 }
