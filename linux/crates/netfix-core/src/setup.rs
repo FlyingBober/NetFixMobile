@@ -23,7 +23,10 @@ pub const DEFAULT_HOSTLIST_TXT: &str = include_str!("../../../presets/hostlists/
 
 const ZAPRET_RELEASE_API: &str = "https://api.github.com/repos/bol-van/zapret/releases/latest";
 const BYEDPI_RELEASE_API: &str = "https://api.github.com/repos/hufrea/byedpi/releases/latest";
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
+const METADATA_TIMEOUT: Duration = Duration::from_secs(20);
+const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const DOWNLOAD_READ_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_DOWNLOAD_ATTEMPTS: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetupPaths {
@@ -690,31 +693,217 @@ pub fn select_github_asset<'a>(
     })
 }
 
+fn format_error_chain(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts = vec![err.to_string()];
+    let mut cur = err.source();
+    while let Some(src) = cur {
+        let msg = src.to_string();
+        if parts.last().map(String::as_str) != Some(msg.as_str()) {
+            parts.push(msg);
+        }
+        cur = src.source();
+    }
+    parts.join(": ")
+}
+
+fn build_download_client() -> Result<reqwest::Client, NetfixError> {
+    reqwest::Client::builder()
+        .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
+        .read_timeout(DOWNLOAD_READ_TIMEOUT)
+        .user_agent("netfixctl/0.1")
+        .build()
+        .map_err(|e| {
+            NetfixError::Runtime(format!(
+                "failed to create HTTP client: {}",
+                format_error_chain(&e)
+            ))
+        })
+}
+
+fn parse_content_range_total(
+    header_val: Option<&str>,
+    expected_start: usize,
+) -> Option<(usize, Option<usize>)> {
+    let raw = header_val?.trim();
+    let rest = raw.strip_prefix("bytes ")?.trim();
+    let (range_part, total_part) = rest.split_once('/')?;
+    let (start_s, _end_s) = range_part.split_once('-')?;
+    let start: usize = start_s.trim().parse().ok()?;
+    if start != expected_start {
+        return None;
+    }
+    let total = if total_part.trim() == "*" {
+        None
+    } else {
+        Some(total_part.trim().parse().ok()?)
+    };
+    Some((start, total))
+}
+
+async fn download_bytes_with_resume(
+    client: &reqwest::Client,
+    url: &str,
+    asset_name: &str,
+) -> Result<Vec<u8>, NetfixError> {
+    let mut buf: Vec<u8> = Vec::new();
+    let mut expected_total: Option<usize> = None;
+    let mut last_err: Option<String> = None;
+
+    for attempt in 1..=MAX_DOWNLOAD_ATTEMPTS {
+        if attempt > 1 {
+            tokio::time::sleep(Duration::from_millis(500 * (attempt as u64 - 1))).await;
+        }
+
+        let mut req = client.get(url);
+        if !buf.is_empty() {
+            req = req.header(reqwest::header::RANGE, format!("bytes={}-", buf.len()));
+        }
+
+        let resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = Some(format!(
+                    "failed to download {asset_name} (attempt {attempt}/{MAX_DOWNLOAD_ATTEMPTS}): {}",
+                    format_error_chain(&e)
+                ));
+                continue;
+            }
+        };
+
+        if !buf.is_empty() && resp.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+            if expected_total.is_some_and(|total| buf.len() == total) {
+                return Ok(buf);
+            }
+            buf.clear();
+            expected_total = None;
+            last_err = Some(format!(
+                "range not satisfiable for {asset_name} (attempt {attempt}/{MAX_DOWNLOAD_ATTEMPTS}), restarting"
+            ));
+            continue;
+        }
+
+        let mut resp = match resp.error_for_status() {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = Some(format!(
+                    "download failed for {asset_name} (attempt {attempt}/{MAX_DOWNLOAD_ATTEMPTS}): {}",
+                    format_error_chain(&e)
+                ));
+                continue;
+            }
+        };
+
+        let status = resp.status();
+        let remaining_len = resp.content_length().and_then(|n| usize::try_from(n).ok());
+        if status == reqwest::StatusCode::PARTIAL_CONTENT {
+            let cr = resp
+                .headers()
+                .get(reqwest::header::CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok());
+            match parse_content_range_total(cr, buf.len()) {
+                Some((start, total_opt)) => {
+                    if let Some(total) = total_opt.or_else(|| remaining_len.map(|rem| start + rem))
+                    {
+                        expected_total = Some(total);
+                    }
+                }
+                None => {
+                    buf.clear();
+                    expected_total = None;
+                    last_err = Some(format!(
+                        "invalid Content-Range for {asset_name} (attempt {attempt}/{MAX_DOWNLOAD_ATTEMPTS}), restarting"
+                    ));
+                    continue;
+                }
+            }
+        } else {
+            buf.clear();
+            expected_total = remaining_len;
+            if let Some(total) = expected_total {
+                buf.reserve(total);
+            }
+        }
+
+        let mut stream_failed = false;
+        loop {
+            match resp.chunk().await {
+                Ok(Some(chunk)) => buf.extend_from_slice(&chunk),
+                Ok(None) => break,
+                Err(e) => {
+                    last_err = Some(format!(
+                        "failed reading {asset_name} (attempt {attempt}/{MAX_DOWNLOAD_ATTEMPTS}): {}",
+                        format_error_chain(&e)
+                    ));
+                    stream_failed = true;
+                    break;
+                }
+            }
+        }
+
+        if stream_failed {
+            continue;
+        }
+
+        if let Some(total) = expected_total {
+            if buf.len() < total {
+                last_err = Some(format!(
+                    "truncated download for {asset_name}: received {} of {total} bytes (attempt {attempt}/{MAX_DOWNLOAD_ATTEMPTS})",
+                    buf.len()
+                ));
+                continue;
+            }
+        }
+
+        return Ok(buf);
+    }
+
+    Err(NetfixError::Runtime(last_err.unwrap_or_else(|| {
+        format!("failed reading {asset_name} after {MAX_DOWNLOAD_ATTEMPTS} attempts")
+    })))
+}
+
 async fn download_engine_from_github(
     engine: &str,
     api_url: &str,
     libexec_dir: &Path,
 ) -> Result<PathBuf, NetfixError> {
-    let client = reqwest::Client::builder()
-        .timeout(DOWNLOAD_TIMEOUT)
+    let metadata_client = reqwest::Client::builder()
+        .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
+        .timeout(METADATA_TIMEOUT)
         .user_agent("netfixctl/0.1")
         .build()
-        .map_err(|e| NetfixError::Runtime(format!("failed to create HTTP client: {e}")))?;
+        .map_err(|e| {
+            NetfixError::Runtime(format!(
+                "failed to create HTTP client: {}",
+                format_error_chain(&e)
+            ))
+        })?;
 
-    let release: GithubRelease = client
+    let release: GithubRelease = metadata_client
         .get(api_url)
         .send()
         .await
         .map_err(|e| {
             NetfixError::Runtime(format!(
-                "failed to fetch {engine} release metadata from {api_url} (hint: use --from-local <dir> or --skip-download): {e}"
+                "failed to fetch {engine} release metadata from {api_url} (hint: use --from-local <dir> or --skip-download): {}",
+                format_error_chain(&e)
             ))
         })?
         .error_for_status()
-        .map_err(|e| NetfixError::Runtime(format!("GitHub API error for {engine}: {e}")))?
+        .map_err(|e| {
+            NetfixError::Runtime(format!(
+                "GitHub API error for {engine}: {}",
+                format_error_chain(&e)
+            ))
+        })?
         .json()
         .await
-        .map_err(|e| NetfixError::Runtime(format!("invalid release JSON for {engine}: {e}")))?;
+        .map_err(|e| {
+            NetfixError::Runtime(format!(
+                "invalid release JSON for {engine}: {}",
+                format_error_chain(&e)
+            ))
+        })?;
 
     let arch = std::env::consts::ARCH;
     let asset = select_github_asset(&release.assets, engine, arch).ok_or_else(|| {
@@ -723,18 +912,14 @@ async fn download_engine_from_github(
         ))
     })?;
 
-    let bytes = client
-        .get(&asset.browser_download_url)
-        .send()
-        .await
-        .map_err(|e| NetfixError::Runtime(format!("failed to download {}: {e}", asset.name)))?
-        .error_for_status()
-        .map_err(|e| NetfixError::Runtime(format!("download failed for {}: {e}", asset.name)))?
-        .bytes()
-        .await
-        .map_err(|e| NetfixError::Runtime(format!("failed reading {}: {e}", asset.name)))?;
+    let download_client = build_download_client()?;
+    let bytes =
+        download_bytes_with_resume(&download_client, &asset.browser_download_url, &asset.name)
+            .await?;
 
-    if let Some(expected_sha) = resolve_release_sha256(&client, &release.assets, asset).await? {
+    if let Some(expected_sha) =
+        resolve_release_sha256(&metadata_client, &release.assets, asset).await?
+    {
         let tmp_dir = TempWorkDir::create("netfix-sha256")?;
         let tmp_file = sanitized_tmp_asset_path(tmp_dir.path(), &asset.name, engine);
         std::fs::write(&tmp_file, &bytes)?;
@@ -1172,5 +1357,88 @@ mod tests {
             sanitized_tmp_asset_path(dir, "..", "ciadpi"),
             dir.join("ciadpi")
         );
+    }
+
+    #[tokio::test]
+    async fn test_download_bytes_with_resume_recovers_after_mid_stream_drop() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let payload: Vec<u8> = (0..100u8).collect();
+        let payload_srv = payload.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            // Attempt 1: send headers claiming 100 bytes, send 40 bytes, drop connection.
+            let (mut s1, _) = listener.accept().await.unwrap();
+            let mut req1 = [0u8; 1024];
+            let _ = s1.read(&mut req1).await.unwrap();
+            s1.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            s1.write_all(&payload_srv[..40]).await.unwrap();
+            s1.shutdown().await.ok();
+            drop(s1);
+
+            // Attempt 2: expect Range: bytes=40-, send 206 Partial Content with remaining 60 bytes.
+            let (mut s2, _) = listener.accept().await.unwrap();
+            let mut req2 = [0u8; 2048];
+            let n = s2.read(&mut req2).await.unwrap();
+            let req_str = String::from_utf8_lossy(&req2[..n]).to_ascii_lowercase();
+            assert!(req_str.contains("range: bytes=40-"), "missing range header: {req_str}");
+            s2.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 60\r\nContent-Range: bytes 40-99/100\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            s2.write_all(&payload_srv[40..]).await.unwrap();
+            s2.shutdown().await.ok();
+        });
+
+        let client = build_download_client().unwrap();
+        let url = format!("http://{addr}/zapret.tar.gz");
+        let got = download_bytes_with_resume(&client, &url, "zapret.tar.gz")
+            .await
+            .unwrap();
+        assert_eq!(got, payload);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_download_bytes_with_resume_restarts_cleanly_on_200_ignore_range() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let payload: Vec<u8> = (0..80u8).collect();
+        let payload_srv = payload.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut s1, _) = listener.accept().await.unwrap();
+            let mut req1 = [0u8; 1024];
+            let _ = s1.read(&mut req1).await.unwrap();
+            s1.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 80\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            s1.write_all(&payload_srv[..20]).await.unwrap();
+            drop(s1);
+
+            let (mut s2, _) = listener.accept().await.unwrap();
+            let mut req2 = [0u8; 2048];
+            let _ = s2.read(&mut req2).await.unwrap();
+            s2.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 80\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            s2.write_all(&payload_srv).await.unwrap();
+            s2.shutdown().await.ok();
+        });
+
+        let client = build_download_client().unwrap();
+        let url = format!("http://{addr}/byedpi.tar.gz");
+        let got = download_bytes_with_resume(&client, &url, "byedpi.tar.gz")
+            .await
+            .unwrap();
+        assert_eq!(got, payload);
+        server.await.unwrap();
     }
 }
