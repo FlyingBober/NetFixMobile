@@ -311,6 +311,17 @@ pub fn build_nfqws_command_with_hostlist(
     cmd.arg(format!("--qnum={qnum}"));
     cmd.arg(format!("--dpi-desync-fwmark=0x{:08x}", cfg.dpi.fwmark));
 
+    let has_uid_override = sanitized.iter().any(|arg| {
+        arg == "--uid"
+            || arg.starts_with("--uid=")
+            || arg == "--user"
+            || arg.starts_with("--user=")
+    });
+    if !has_uid_override {
+        let (drop_uid, drop_gid) = resolve_unprivileged_uid_gid();
+        cmd.arg(format!("--uid={drop_uid}:{drop_gid}"));
+    }
+
     let has_hostlist = sanitized
         .iter()
         .any(|arg| arg == "--hostlist" || arg.starts_with("--hostlist="));
@@ -539,6 +550,24 @@ mod tests {
         assert!(args.contains(&"--dpi-desync-fwmark=0x40000000".into()));
         assert!(args.contains(&"--dpi-desync=fake".into()));
         assert!(!args.contains(&"--qnum=1".into()));
+        assert!(args.iter().any(|a| a.starts_with("--uid=")));
+
+        let custom_uid = build_nfqws_command(
+            &cfg,
+            Path::new("/usr/bin/nfqws"),
+            "--uid=1000:1000 --dpi-desync=fake",
+            200,
+        )
+        .unwrap();
+        let custom_args: Vec<_> = custom_uid
+            .get_args()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            custom_args.iter().filter(|a| a.starts_with("--uid=")).count(),
+            1
+        );
+        assert!(custom_args.contains(&"--uid=1000:1000".into()));
     }
 
     #[test]

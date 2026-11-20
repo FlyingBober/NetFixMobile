@@ -62,6 +62,8 @@ fn apply_tgproxy_config(
 
     tgwsproxy::cffront::set_front_ips(cfg.tgproxy.cf_front_ips.clone());
     tgwsproxy::cffront::set_plain_first(cfg.tgproxy.cf_plain_first);
+    tgwsproxy::config::CF_PRIORITY.store(cfg.tgproxy.cf_priority, Ordering::Relaxed);
+    tgwsproxy::cffront::set_direct_fast_fail(cfg.tgproxy.cf_priority);
     tgwsproxy::cfproxy::init_cfproxy_domains();
 
     let dc_opt_map = tgwsproxy::proxy::parse_cidr_pool(&cfg.tgproxy.dc_ips);
@@ -218,7 +220,9 @@ mod tests {
         assert!(tgwsproxy::config::TLS_VERIFY.load(Ordering::Relaxed));
         assert_eq!(tgwsproxy::config::POOL_SIZE.load(Ordering::Relaxed), 8);
         assert!(!tgwsproxy::config::CFPROXY_ENABLED.load(Ordering::Relaxed));
+        assert!(tgwsproxy::config::CF_PRIORITY.load(Ordering::Relaxed));
         assert!(tgwsproxy::cffront::enabled());
+        assert!(tgwsproxy::cffront::direct_fast_fail());
         assert_eq!(
             tgwsproxy::config::CFPROXY.read().cache_dir,
             state_dir.to_string_lossy()
