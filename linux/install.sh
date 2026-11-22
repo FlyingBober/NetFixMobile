@@ -83,10 +83,33 @@ run_as_root() {
     fi
 }
 
+find_prebuilt_binaries() {
+    if [[ -x "${SCRIPT_DIR}/bin/netfixctl" && -x "${SCRIPT_DIR}/bin/netfix-tgproxy" ]]; then
+        CTL_BIN="${SCRIPT_DIR}/bin/netfixctl"
+        TG_BIN="${SCRIPT_DIR}/bin/netfix-tgproxy"
+        return 0
+    elif [[ -x "${SCRIPT_DIR}/netfixctl" && -x "${SCRIPT_DIR}/netfix-tgproxy" ]]; then
+        CTL_BIN="${SCRIPT_DIR}/netfixctl"
+        TG_BIN="${SCRIPT_DIR}/netfix-tgproxy"
+        return 0
+    elif [[ -x "${SCRIPT_DIR}/target/release/netfixctl" && -x "${SCRIPT_DIR}/target/release/netfix-tgproxy" ]]; then
+        CTL_BIN="${SCRIPT_DIR}/target/release/netfixctl"
+        TG_BIN="${SCRIPT_DIR}/target/release/netfix-tgproxy"
+        return 0
+    fi
+    return 1
+}
+
+CTL_BIN=""
+TG_BIN=""
+
 if [[ "${NO_BUILD}" -eq 0 ]]; then
-    if run_as_builder bash -lc 'command -v cargo >/dev/null 2>&1'; then
+    if find_prebuilt_binaries; then
+        echo "[1/4] Found prebuilt release binaries in directory, skipping compilation..."
+    elif run_as_builder bash -lc 'command -v cargo >/dev/null 2>&1'; then
         echo "[1/4] Building release binaries with cargo..."
         run_as_builder bash -lc "cd '$SCRIPT_DIR' && cargo build --release --workspace --locked"
+        find_prebuilt_binaries || true
     elif command -v docker >/dev/null 2>&1 && docker image inspect netfix-rust-ci:latest >/dev/null 2>&1; then
         echo "[1/4] Building release binaries with Docker (netfix-rust-ci:latest)..."
         REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -104,6 +127,7 @@ if [[ "${NO_BUILD}" -eq 0 ]]; then
             -v /tmp/netfix-cargo-cache:/tmp/cargo \
             -w /work/linux netfix-rust-ci:latest \
             cargo build --release --workspace --locked
+        find_prebuilt_binaries || true
     else
         echo "error: neither cargo nor Docker image 'netfix-rust-ci:latest' found." >&2
         echo "Install Rust (https://rustup.rs) or build with --no-build after compiling." >&2
@@ -111,12 +135,11 @@ if [[ "${NO_BUILD}" -eq 0 ]]; then
     fi
 else
     echo "[1/4] Skipping build (--no-build)..."
+    find_prebuilt_binaries || true
 fi
 
-CTL_BIN="${SCRIPT_DIR}/target/release/netfixctl"
-TG_BIN="${SCRIPT_DIR}/target/release/netfix-tgproxy"
-if [[ ! -x "${CTL_BIN}" || ! -x "${TG_BIN}" ]]; then
-    echo "error: release binaries not found at ${CTL_BIN} and ${TG_BIN}" >&2
+if [[ -z "${CTL_BIN}" || -z "${TG_BIN}" || ! -x "${CTL_BIN}" || ! -x "${TG_BIN}" ]]; then
+    echo "error: release binaries not found at bin/, target/release/ or root." >&2
     exit 1
 fi
 

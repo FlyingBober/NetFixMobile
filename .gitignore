@@ -14,5 +14,6 @@ build_out*.txt
 RELEASE_*.md
 TELEGRAM_POST_*.md
 linux/target/
+linux/dist/
 native/tgproxy-rust/target/
 .superpowers/

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - linux-headless
+      - 'fix/*'
+      - 'feat/*'
+  pull_request:
+    branches:
+      - main
+      - linux-headless
+
+jobs:
+  test-linux:
+    name: Test Linux Crates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            linux -> target
+            native/tgproxy-rust -> target
+
+      - name: Run Cargo Tests
+        working-directory: linux
+        run: cargo test --workspace --locked
+
+      - name: Build Release
+        working-directory: linux
+        run: cargo build --release --workspace --locked
