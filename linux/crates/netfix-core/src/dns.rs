@@ -72,9 +72,38 @@ fn validate_server_ips(servers: &[String]) -> Result<Vec<String>, NetfixError> {
     Ok(validated)
 }
 
+/// Returns the TLS SNI hostname for built-in DNS-over-TLS presets.
+pub fn dot_sni_for_mode(mode: DnsMode) -> Option<&'static str> {
+    match mode {
+        DnsMode::Cloudflare => Some("cloudflare-dns.com"),
+        DnsMode::Google => Some("dns.google"),
+        DnsMode::Quad9 => Some("dns.quad9.net"),
+        DnsMode::Adguard => Some("dns.adguard-dns.com"),
+        DnsMode::System | DnsMode::Custom => None,
+    }
+}
+
+/// Renders a `systemd-resolved` drop-in file (`90-netfix.conf`) for the given servers and mode.
+pub fn render_resolved_dropin_for_mode(servers: &[String], mode: DnsMode) -> String {
+    let sni = dot_sni_for_mode(mode);
+    let formatted_servers: Vec<String> = servers
+        .iter()
+        .map(|ip| match sni {
+            Some(host) => format!("{ip}#{host}"),
+            None => ip.clone(),
+        })
+        .collect();
+    // Use opportunistic DoT and Domains=~. so all unrouted domain lookups use the
+    // configured secure servers without forcing strict DoT or breaking per-link/VPN split-DNS.
+    format!(
+        "[Resolve]\nDNS={}\nDomains=~.\nDNSOverTLS=opportunistic\n",
+        formatted_servers.join(" ")
+    )
+}
+
 /// Renders a `systemd-resolved` drop-in file (`90-netfix.conf`) for the given servers.
 pub fn render_resolved_dropin(servers: &[String]) -> String {
-    format!("[Resolve]\nDNS={}\n", servers.join(" "))
+    render_resolved_dropin_for_mode(servers, DnsMode::Custom)
 }
 
 /// Renders a plain `/etc/resolv.conf` containing the given `nameserver` IPs.
@@ -105,16 +134,25 @@ pub fn parse_resolv_conf_nameservers(content: &str) -> Vec<String> {
     out
 }
 
-/// Writes or removes a `systemd-resolved` drop-in configuration at `dropin_path`.
-pub fn apply_resolved_dropin(dropin_path: &Path, servers: &[String]) -> Result<(), NetfixError> {
+/// Writes or removes a `systemd-resolved` drop-in configuration at `dropin_path` for `mode`.
+pub fn apply_resolved_dropin_for_mode(
+    dropin_path: &Path,
+    servers: &[String],
+    mode: DnsMode,
+) -> Result<(), NetfixError> {
     let validated = validate_server_ips(servers)?;
     if validated.is_empty() {
         return remove_resolved_dropin(dropin_path);
     }
     ensure_parent_dir(dropin_path)?;
-    let content = render_resolved_dropin(&validated);
+    let content = render_resolved_dropin_for_mode(&validated, mode);
     write_atomic_with_mode(dropin_path, content.as_bytes(), 0o644)?;
     Ok(())
+}
+
+/// Writes or removes a `systemd-resolved` drop-in configuration at `dropin_path`.
+pub fn apply_resolved_dropin(dropin_path: &Path, servers: &[String]) -> Result<(), NetfixError> {
+    apply_resolved_dropin_for_mode(dropin_path, servers, DnsMode::Custom)
 }
 
 /// Removes the `systemd-resolved` drop-in at `dropin_path` if present.
@@ -198,7 +236,12 @@ fn is_network_manager_active() -> bool {
 }
 
 fn run_checked(program: &str, args: &[&str]) -> Result<String, NetfixError> {
-    let output = Command::new(program).args(args).output().map_err(|err| {
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    if program == "nmcli" {
+        cmd.env("LC_ALL", "C");
+    }
+    let output = cmd.output().map_err(|err| {
         NetfixError::Runtime(format!("failed to execute {program}: {err}"))
     })?;
     if !output.status.success() {
@@ -355,8 +398,35 @@ fn apply_nmcli_dns(servers: &[String]) -> Result<(), NetfixError> {
     Ok(())
 }
 
+fn normalize_nmcli_bool_opt(raw: &str) -> &str {
+    match raw.trim() {
+        "" => "no",
+        "yes" | "да" | "true" | "1" => "yes",
+        "no" | "нет" | "false" | "0" => "no",
+        other => other,
+    }
+}
+
+fn nmcli_active_uuids_all() -> std::collections::HashSet<String> {
+    let Ok(stdout) = run_checked("nmcli", &["-t", "-f", "UUID", "con", "show", "--active"]) else {
+        return std::collections::HashSet::new();
+    };
+    stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Restores all saved NetworkManager DNS entries best-effort without aborting on the first failure.
-fn reset_nmcli_entries<F>(backups: &[NmcliConnBackup], mut runner: F) -> (usize, Vec<String>)
+/// Only reactivates (`nmcli con up`) connections that are currently active; disconnected profiles
+/// are already restored via `nmcli con mod`.
+fn reset_nmcli_entries<F>(
+    backups: &[NmcliConnBackup],
+    active_uuids: &std::collections::HashSet<String>,
+    mut runner: F,
+) -> (usize, Vec<String>)
 where
     F: FnMut(&[&str]) -> Result<(), NetfixError>,
 {
@@ -364,16 +434,8 @@ where
     let mut errors = Vec::new();
 
     for entry in backups {
-        let ipv4_ignore = if entry.ipv4_ignore_auto_dns.is_empty() {
-            "no"
-        } else {
-            entry.ipv4_ignore_auto_dns.as_str()
-        };
-        let ipv6_ignore = if entry.ipv6_ignore_auto_dns.is_empty() {
-            "no"
-        } else {
-            entry.ipv6_ignore_auto_dns.as_str()
-        };
+        let ipv4_ignore = normalize_nmcli_bool_opt(&entry.ipv4_ignore_auto_dns);
+        let ipv6_ignore = normalize_nmcli_bool_opt(&entry.ipv6_ignore_auto_dns);
         let mod_args = [
             "con",
             "mod",
@@ -391,9 +453,11 @@ where
             errors.push(format!("{}: {err}", entry.uuid));
             continue;
         }
-        if let Err(err) = runner(&["con", "up", entry.uuid.as_str()]) {
-            errors.push(format!("{}: {err}", entry.uuid));
-            continue;
+        if active_uuids.contains(&entry.uuid) {
+            if let Err(err) = runner(&["con", "up", entry.uuid.as_str()]) {
+                errors.push(format!("{}: {err}", entry.uuid));
+                continue;
+            }
         }
         restored += 1;
     }
@@ -401,7 +465,11 @@ where
     (restored, errors)
 }
 
-fn reset_nmcli_backup_file<F>(backup_path: &Path, runner: F) -> Result<(), NetfixError>
+fn reset_nmcli_backup_file<F>(
+    backup_path: &Path,
+    active_uuids: &std::collections::HashSet<String>,
+    runner: F,
+) -> Result<(), NetfixError>
 where
     F: FnMut(&[&str]) -> Result<(), NetfixError>,
 {
@@ -413,7 +481,7 @@ where
     let backups: Vec<NmcliConnBackup> = serde_json::from_slice(&raw)
         .map_err(|e| NetfixError::Runtime(format!("failed to parse nmcli DNS backup: {e}")))?;
 
-    let (restored, errors) = reset_nmcli_entries(&backups, runner);
+    let (restored, errors) = reset_nmcli_entries(&backups, active_uuids, runner);
     let all_stale = !errors.is_empty()
         && errors
             .iter()
@@ -434,7 +502,8 @@ where
 }
 
 fn reset_nmcli_dns() -> Result<(), NetfixError> {
-    reset_nmcli_backup_file(Path::new(NMCLI_BACKUP_PATH), |args| {
+    let active_uuids = nmcli_active_uuids_all();
+    reset_nmcli_backup_file(Path::new(NMCLI_BACKUP_PATH), &active_uuids, |args| {
         run_checked("nmcli", args).map(|_| ())
     })
 }
@@ -451,7 +520,7 @@ pub fn apply_dns(cfg: &NetfixConfig) -> Result<(), NetfixError> {
 
     match detect_backend() {
         DnsBackend::SystemdResolved => {
-            apply_resolved_dropin(Path::new(RESOLVED_DROPIN_PATH), &servers)?;
+            apply_resolved_dropin_for_mode(Path::new(RESOLVED_DROPIN_PATH), &servers, cfg.dns.mode)?;
             run_checked("systemctl", &["restart", "systemd-resolved"])?;
             Ok(())
         }
@@ -464,24 +533,40 @@ pub fn apply_dns(cfg: &NetfixConfig) -> Result<(), NetfixError> {
     }
 }
 
-/// Restores system DNS configuration by removing drop-ins and restoring backups.
+/// Restores system DNS configuration best-effort across all backends (drop-in, NetworkManager, `/etc/resolv.conf`).
 pub fn reset_dns() -> Result<(), NetfixError> {
     crate::require_root("reset DNS settings")?;
 
+    let mut errors = Vec::new();
+
     let dropin = Path::new(RESOLVED_DROPIN_PATH);
-    if dropin.exists() {
-        remove_resolved_dropin(dropin)?;
-        if is_systemd_resolved_active() {
-            run_checked("systemctl", &["restart", "systemd-resolved"])?;
+    let dropin_existed = dropin.exists();
+    if dropin_existed {
+        if let Err(err) = remove_resolved_dropin(dropin) {
+            errors.push(err.to_string());
         }
     }
 
     if Path::new(NMCLI_BACKUP_PATH).exists() {
-        reset_nmcli_dns()?;
+        if let Err(err) = reset_nmcli_dns() {
+            errors.push(err.to_string());
+        }
     }
 
     if Path::new(RESOLV_BACKUP_PATH).exists() {
-        reset_resolv_conf(Path::new(RESOLV_CONF_PATH), Path::new(RESOLV_BACKUP_PATH))?;
+        if let Err(err) = reset_resolv_conf(Path::new(RESOLV_CONF_PATH), Path::new(RESOLV_BACKUP_PATH)) {
+            errors.push(err.to_string());
+        }
+    }
+
+    if dropin_existed && is_systemd_resolved_active() {
+        if let Err(err) = run_checked("systemctl", &["restart", "systemd-resolved"]) {
+            errors.push(err.to_string());
+        }
+    }
+
+    if !errors.is_empty() {
+        return Err(NetfixError::Runtime(errors.join("; ")));
     }
 
     Ok(())
@@ -516,7 +601,19 @@ mod tests {
     #[test]
     fn test_render_resolved_dropin_formats_servers() {
         let conf = render_resolved_dropin(&["1.1.1.1".into(), "9.9.9.9".into()]);
-        assert!(conf.contains("[Resolve]\nDNS=1.1.1.1 9.9.9.9\n"));
+        assert_eq!(
+            conf,
+            "[Resolve]\nDNS=1.1.1.1 9.9.9.9\nDomains=~.\nDNSOverTLS=opportunistic\n"
+        );
+
+        let cf_conf = render_resolved_dropin_for_mode(
+            &["1.1.1.1".into(), "1.0.0.1".into()],
+            DnsMode::Cloudflare,
+        );
+        assert_eq!(
+            cf_conf,
+            "[Resolve]\nDNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com\nDomains=~.\nDNSOverTLS=opportunistic\n"
+        );
     }
 
     #[test]
@@ -561,7 +658,7 @@ mod tests {
         apply_resolved_dropin(&dropin, &["1.1.1.1".into(), "1.0.0.1".into()]).unwrap();
         assert_eq!(
             std::fs::read_to_string(&dropin).unwrap(),
-            "[Resolve]\nDNS=1.1.1.1 1.0.0.1\n"
+            "[Resolve]\nDNS=1.1.1.1 1.0.0.1\nDomains=~.\nDNSOverTLS=opportunistic\n"
         );
 
         // Empty server list removes the drop-in cleanly.
@@ -748,7 +845,8 @@ nameserver invalid-token
         std::fs::write(&backup_path, serde_json::to_vec(&backups).unwrap()).unwrap();
 
         let mut calls: Vec<Vec<String>> = Vec::new();
-        let err = reset_nmcli_backup_file(&backup_path, |args| {
+        let active: std::collections::HashSet<String> = ["valid-uuid".to_string()].into_iter().collect();
+        let err = reset_nmcli_backup_file(&backup_path, &active, |args| {
             calls.push(args.iter().map(|s| (*s).to_string()).collect());
             if args.contains(&"missing-uuid") {
                 return Err(NetfixError::Runtime("Unknown connection".into()));
@@ -775,5 +873,46 @@ nameserver invalid-token
         assert!(calls
             .iter()
             .any(|c| c == &vec!["con", "up", "valid-uuid"]));
+    }
+
+    #[test]
+    fn test_reset_nmcli_entries_skips_con_up_for_inactive_connection() {
+        let dir = tempfile::tempdir().unwrap();
+        let backup_path = dir.path().join("dns-nmcli-backup.json");
+        let backups = vec![NmcliConnBackup {
+            uuid: "offline-eth-uuid".into(),
+            ipv4_dns: "192.168.160.251".into(),
+            ipv4_ignore_auto_dns: "нет".into(),
+            ipv6_dns: String::new(),
+            ipv6_ignore_auto_dns: "no".into(),
+        }];
+        std::fs::write(&backup_path, serde_json::to_vec(&backups).unwrap()).unwrap();
+
+        let mut calls: Vec<Vec<String>> = Vec::new();
+        let active = std::collections::HashSet::new();
+        reset_nmcli_backup_file(&backup_path, &active, |args| {
+            calls.push(args.iter().map(|s| (*s).to_string()).collect());
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(!backup_path.exists());
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0],
+            vec![
+                "con",
+                "mod",
+                "offline-eth-uuid",
+                "ipv4.dns",
+                "192.168.160.251",
+                "ipv4.ignore-auto-dns",
+                "no",
+                "ipv6.dns",
+                "",
+                "ipv6.ignore-auto-dns",
+                "no",
+            ]
+        );
     }
 }

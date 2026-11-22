@@ -16,4 +16,4 @@ ProtectSystem=strict
 ReadWritePaths=/var/lib/netfix/tgproxy
 
 [Install]
-WantedBy=netfix.target
+WantedBy=multi-user.target
