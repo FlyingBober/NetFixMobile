@@ -13,8 +13,7 @@ use crate::firewall::{
 };
 use crate::strategy::{expand_sni, sanitize_ciadpi_args, sanitize_nfqws_args};
 use crate::{
-    normalize_network_key, CiadpiMode, DpiEngineKind, NetfixConfig, NetfixError,
-    DEFAULT_LIBEXEC_DIR,
+    CiadpiMode, DpiEngineKind, NetfixConfig, NetfixError, DEFAULT_LIBEXEC_DIR,
 };
 
 pub const DEFAULT_FIREWALL_TABLE: &str = "netfix";
@@ -261,25 +260,29 @@ pub fn resolve_free_port(bind_ip: &str, preferred: u16) -> u16 {
     preferred
 }
 
-/// Resolves the active strategy string for the configured engine and network override.
-pub fn resolve_active_strategy(cfg: &NetfixConfig) -> &str {
-    if let Some(ref network) = cfg.general.active_network_override {
-        let key = normalize_network_key(network);
-        if let Some(net_strat) = cfg.dpi.network_strategies.get(&key) {
-            let override_strat = match cfg.dpi.engine {
-                DpiEngineKind::Nfqws => net_strat.nfqws.as_deref(),
-                DpiEngineKind::Ciadpi => net_strat.ciadpi.as_deref(),
-            };
-            if let Some(s) = override_strat.map(str::trim).filter(|s| !s.is_empty()) {
-                return s;
-            }
+/// Resolves the active strategy string, detected network key, and whether it came from a network-specific profile.
+pub fn resolve_strategy_for_config(cfg: &NetfixConfig) -> (&str, String, bool) {
+    let net_key = crate::network::detect_active_network_key(cfg);
+    if let Some(net_strat) = cfg.dpi.network_strategies.get(&net_key) {
+        let override_strat = match cfg.dpi.engine {
+            DpiEngineKind::Nfqws => net_strat.nfqws.as_deref(),
+            DpiEngineKind::Ciadpi => net_strat.ciadpi.as_deref(),
+        };
+        if let Some(s) = override_strat.map(str::trim).filter(|s| !s.is_empty()) {
+            return (s, net_key, true);
         }
     }
 
-    match cfg.dpi.engine {
+    let fallback = match cfg.dpi.engine {
         DpiEngineKind::Nfqws => cfg.dpi.active_strategy_nfqws.as_str(),
         DpiEngineKind::Ciadpi => cfg.dpi.active_strategy_ciadpi.as_str(),
-    }
+    };
+    (fallback, net_key, false)
+}
+
+/// Resolves the active strategy string for the configured engine and detected network.
+pub fn resolve_active_strategy(cfg: &NetfixConfig) -> &str {
+    resolve_strategy_for_config(cfg).0
 }
 
 /// Builds a sanitized `nfqws` command with pinned `--qnum` and `--dpi-desync-fwmark`.

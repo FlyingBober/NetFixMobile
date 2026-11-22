@@ -19,6 +19,8 @@ pub const NETFIX_DPI_SERVICE_UNIT: &str = include_str!("../../../systemd/netfix-
 pub const NETFIX_TGPROXY_SERVICE_UNIT: &str =
     include_str!("../../../systemd/netfix-tgproxy.service");
 pub const NETFIX_TARGET_UNIT: &str = include_str!("../../../systemd/netfix.target");
+pub const NETFIX_DISPATCHER_SCRIPT: &str =
+    include_str!("../../../systemd/netfix-dispatcher.sh");
 pub const DEFAULT_HOSTLIST_TXT: &str = include_str!("../../../presets/hostlists/default.txt");
 
 const ZAPRET_RELEASE_API: &str = "https://api.github.com/repos/bol-van/zapret/releases/latest";
@@ -36,6 +38,7 @@ pub struct SetupPaths {
     pub tgproxy_state_dir: PathBuf,
     pub libexec_dir: PathBuf,
     pub systemd_dir: PathBuf,
+    pub nm_dispatcher_dir: PathBuf,
 }
 
 impl SetupPaths {
@@ -53,6 +56,7 @@ impl SetupPaths {
             state_dir,
             libexec_dir: prefix.join(DEFAULT_LIBEXEC_DIR.trim_start_matches('/')),
             systemd_dir: prefix.join("etc/systemd/system"),
+            nm_dispatcher_dir: prefix.join("etc/NetworkManager/dispatcher.d"),
         }
     }
 }
@@ -81,6 +85,24 @@ pub struct SetupReport {
     pub ciadpi_path: Option<PathBuf>,
     pub nft_path: Option<PathBuf>,
     pub iptables_path: Option<PathBuf>,
+    pub daemon_reloaded: bool,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UninstallOptions {
+    pub purge: bool,
+    pub prefix: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UninstallReport {
+    pub units_removed: Vec<PathBuf>,
+    pub engines_removed: Vec<PathBuf>,
+    pub config_removed: bool,
+    pub state_removed: bool,
+    pub dns_reset: bool,
+    pub hosts_reset: bool,
     pub daemon_reloaded: bool,
     pub warnings: Vec<String>,
 }
@@ -285,6 +307,22 @@ pub fn provision_layout(
         units_installed.push(dest);
     }
 
+    let dispatcher_script = paths.nm_dispatcher_dir.join("90-netfix.sh");
+    if paths.nm_dispatcher_dir.exists()
+        || paths
+            .nm_dispatcher_dir
+            .parent()
+            .map(|p| p.exists())
+            .unwrap_or(false)
+    {
+        ensure_parent_dir(&dispatcher_script)?;
+        write_atomic_with_mode(
+            &dispatcher_script,
+            NETFIX_DISPATCHER_SCRIPT.as_bytes(),
+            0o755,
+        )?;
+    }
+
     Ok((config_created, units_installed))
 }
 
@@ -381,6 +419,129 @@ pub async fn run_setup(opts: &SetupOptions) -> Result<SetupReport, NetfixError> 
         ciadpi_path: tools.ciadpi,
         nft_path: tools.nft,
         iptables_path: tools.iptables,
+        daemon_reloaded,
+        warnings,
+    })
+}
+
+fn remove_file_if_present(path: &Path) -> Result<bool, NetfixError> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn remove_dir_all_if_present(path: &Path) -> Result<bool, NetfixError> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    std::fs::remove_dir_all(path)?;
+    Ok(true)
+}
+
+fn disable_and_stop_systemd_units(warnings: &mut Vec<String>) {
+    for unit in ["netfix-dpi.service", "netfix-tgproxy.service", "netfix.target"] {
+        match Command::new("systemctl")
+            .args(["disable", "--now", unit])
+            .output()
+        {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let trimmed = stderr.trim();
+                if !trimmed.is_empty()
+                    && !trimmed.contains("does not exist")
+                    && !trimmed.contains("not loaded")
+                {
+                    warnings.push(format!("systemctl disable --now {unit}: {trimmed}"));
+                }
+            }
+            Err(err) => warnings.push(format!("failed to run systemctl for {unit}: {err}")),
+        }
+    }
+}
+
+/// Removes installed NetFix systemd units, engine binaries, and (with `purge`) configuration/state.
+pub fn run_uninstall(opts: &UninstallOptions) -> Result<UninstallReport, NetfixError> {
+    let is_system = opts.prefix.is_none();
+    if is_system {
+        crate::require_root("run netfix uninstall")?;
+    }
+
+    let paths = match &opts.prefix {
+        Some(prefix) => SetupPaths::with_prefix(prefix),
+        None => SetupPaths::system(),
+    };
+
+    let mut warnings = Vec::new();
+    let cfg = NetfixConfig::load(&paths.config_path).unwrap_or_default();
+
+    if is_system {
+        disable_and_stop_systemd_units(&mut warnings);
+        if let Err(err) = crate::dpi::cleanup_dpi_firewall(&cfg) {
+            warnings.push(format!("DPI firewall cleanup warning: {err}"));
+        }
+    }
+
+    let mut units_removed = Vec::new();
+    for unit in ["netfix-dpi.service", "netfix-tgproxy.service", "netfix.target"] {
+        let dest = paths.systemd_dir.join(unit);
+        if remove_file_if_present(&dest)? {
+            units_removed.push(dest);
+        }
+    }
+
+    let dispatcher_script = paths.nm_dispatcher_dir.join("90-netfix.sh");
+    let _ = remove_file_if_present(&dispatcher_script);
+
+    let mut engines_removed = Vec::new();
+    for engine in ["nfqws", "ciadpi"] {
+        let bin = paths.libexec_dir.join(engine);
+        if remove_file_if_present(&bin)? {
+            engines_removed.push(bin);
+        }
+    }
+    if paths.libexec_dir.exists() {
+        let _ = std::fs::remove_dir(&paths.libexec_dir);
+    }
+
+    let mut dns_reset = false;
+    let mut hosts_reset = false;
+    let mut config_removed = false;
+    let mut state_removed = false;
+
+    if opts.purge {
+        if is_system {
+            match crate::dns::reset_dns() {
+                Ok(()) => dns_reset = true,
+                Err(err) => warnings.push(format!("DNS reset warning: {err}")),
+            }
+            match crate::hosts::reset_hosts_file(
+                Path::new(crate::hosts::SYSTEM_HOSTS_PATH),
+                Path::new(crate::hosts::SYSTEM_HOSTS_BACKUP_PATH),
+            ) {
+                Ok(()) => hosts_reset = true,
+                Err(err) => warnings.push(format!("hosts reset warning: {err}")),
+            }
+        }
+        config_removed = remove_dir_all_if_present(&paths.etc_dir)?;
+        state_removed = remove_dir_all_if_present(&paths.state_dir)?;
+    }
+
+    let daemon_reloaded = if is_system {
+        reload_systemd_daemon()?
+    } else {
+        false
+    };
+
+    Ok(UninstallReport {
+        units_removed,
+        engines_removed,
+        config_removed,
+        state_removed,
+        dns_reset,
+        hosts_reset,
         daemon_reloaded,
         warnings,
     })
@@ -1440,5 +1601,53 @@ mod tests {
             .unwrap();
         assert_eq!(got, payload);
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_uninstall_removes_units_and_engines_and_purge_cleans_config_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let src_dir = dir.path().join("engines");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(src_dir.join("nfqws"), b"fake-nfqws").unwrap();
+        std::fs::write(src_dir.join("ciadpi"), b"fake-ciadpi").unwrap();
+
+        let prefix = dir.path().join("root");
+        let setup_report = run_setup(&SetupOptions {
+            from_local: Some(src_dir),
+            skip_download: true,
+            prefix: Some(prefix.clone()),
+        })
+        .await
+        .unwrap();
+        assert_eq!(setup_report.units_installed.len(), 3);
+
+        let paths = SetupPaths::with_prefix(&prefix);
+        assert!(paths.config_path.exists());
+        assert!(paths.libexec_dir.join("nfqws").exists());
+        assert!(paths.libexec_dir.join("ciadpi").exists());
+
+        // Non-purge uninstall removes units and engines but keeps config and state.
+        let keep_cfg = run_uninstall(&UninstallOptions {
+            purge: false,
+            prefix: Some(prefix.clone()),
+        })
+        .unwrap();
+        assert_eq!(keep_cfg.units_removed.len(), 3);
+        assert_eq!(keep_cfg.engines_removed.len(), 2);
+        assert!(!keep_cfg.config_removed);
+        assert!(!keep_cfg.state_removed);
+        assert!(paths.config_path.exists());
+        assert!(paths.state_dir.exists());
+
+        // Purge removes /etc/netfix and /var/lib/netfix as well.
+        let purged = run_uninstall(&UninstallOptions {
+            purge: true,
+            prefix: Some(prefix),
+        })
+        .unwrap();
+        assert!(purged.config_removed);
+        assert!(purged.state_removed);
+        assert!(!paths.etc_dir.exists());
+        assert!(!paths.state_dir.exists());
     }
 }

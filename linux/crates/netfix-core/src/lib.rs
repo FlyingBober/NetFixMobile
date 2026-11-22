@@ -3,6 +3,7 @@ pub mod dns;
 pub mod dpi;
 pub mod firewall;
 pub mod hosts;
+pub mod network;
 pub mod scanner;
 pub mod setup;
 pub mod strategy;
@@ -13,6 +14,7 @@ pub use config::{
     GeneralConfig, IpsetMode, NetfixConfig, NetworkStrategy, TgProxyConfig, DEFAULT_CONFIG_PATH,
     DEFAULT_LIBEXEC_DIR, DEFAULT_STATE_DIR,
 };
+pub use network::{detect_active_network_key, detect_current_network_info, NetworkInfo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]

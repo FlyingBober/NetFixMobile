@@ -5,13 +5,17 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use netfix_core::dpi::{find_engine_binary, resolve_active_strategy};
+use netfix_core::dpi::{find_engine_binary, resolve_strategy_for_config};
 use netfix_core::hosts::{
     MANAGED_BEGIN, MANAGED_END, SYSTEM_HOSTS_BACKUP_PATH, SYSTEM_HOSTS_PATH,
 };
+use netfix_core::network::{
+    detect_active_network_key, detect_current_network_info, NetworkInfo,
+};
 use netfix_core::scanner::ScanPhase;
 use netfix_core::setup::{
-    chown_secret_to_netfix_if_root, run_setup, SetupOptions, SetupReport,
+    chown_secret_to_netfix_if_root, run_setup, run_uninstall, SetupOptions, SetupReport,
+    UninstallOptions, UninstallReport,
 };
 use netfix_core::{
     dns, dpi, hosts, normalize_network_key, scanner, tg, CiadpiMode, DnsMode, DpiEngineKind,
@@ -108,6 +112,21 @@ pub enum Commands {
         #[arg(value_enum, default_value_t = ServiceTarget::All)]
         target: ServiceTarget,
     },
+    /// Enable autostart at boot for NetFix systemd service(s)
+    Enable {
+        #[arg(value_enum, default_value_t = ServiceTarget::All)]
+        target: ServiceTarget,
+    },
+    /// Disable autostart at boot for NetFix systemd service(s)
+    Disable {
+        #[arg(value_enum, default_value_t = ServiceTarget::All)]
+        target: ServiceTarget,
+    },
+    /// Remove NetFix systemd units and engines (use --purge to also remove config, state, and DNS/hosts changes)
+    Uninstall {
+        #[arg(long)]
+        purge: bool,
+    },
     /// Inspect NetFix service and configuration status
     Status {
         #[arg(value_enum, default_value_t = ServiceTarget::All)]
@@ -126,6 +145,11 @@ pub enum Commands {
     },
     /// Probe Telegram DC1-DC5 and Cloudflare proxy domains
     DcCheck,
+    /// Manage network-specific strategy profiles and inspect current network
+    Network {
+        #[command(subcommand)]
+        action: Option<NetworkAction>,
+    },
     /// Manage system DNS configuration
     Dns {
         #[command(subcommand)]
@@ -145,6 +169,19 @@ pub enum Commands {
     DpiRun,
     /// Internal systemd entrypoint: clean up DPI firewall tables/chains
     DpiCleanup,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum NetworkAction {
+    /// Show current detected network, active engine, and resolved strategy
+    Current,
+    /// List all saved network profiles and strategies
+    List,
+    /// Switch network profile override ('auto' to restore auto-detection)
+    Switch {
+        #[arg(value_name = "PROFILE")]
+        profile: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -224,6 +261,7 @@ pub struct DpiStatusSummary {
     pub ciadpi_mode: CiadpiMode,
     pub active_strategy: String,
     pub engine_binary_found: bool,
+    pub strategy_source: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -244,6 +282,7 @@ pub struct StatusReport {
     pub dpi: Option<DpiStatusSummary>,
     pub tgproxy: Option<TgStatusSummary>,
     pub dns_mode: DnsMode,
+    pub network: NetworkInfo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -345,6 +384,15 @@ async fn dispatch(cli: Cli) -> Result<(), NetfixError> {
         Commands::Start { target } => handle_service_action("start", target, json)?,
         Commands::Stop { target } => handle_service_action("stop", target, json)?,
         Commands::Restart { target } => handle_service_action("restart", target, json)?,
+        Commands::Enable { target } => handle_service_action("enable", target, json)?,
+        Commands::Disable { target } => handle_service_action("disable", target, json)?,
+        Commands::Uninstall { purge } => {
+            let report = run_uninstall(&UninstallOptions {
+                purge,
+                prefix: None,
+            })?;
+            print_uninstall_report(&report, json)?;
+        }
         Commands::Status { target } => {
             let (cfg, exists) = load_config_for_inspection(&config_path, explicit_config)?;
             let report = build_status_report(target, &config_path, exists, &cfg);
@@ -371,6 +419,9 @@ async fn dispatch(cli: Cli) -> Result<(), NetfixError> {
             let (cfg, _) = load_config_for_inspection(&config_path, explicit_config)?;
             let report = tg::probe_dc_and_cf(&cfg).await;
             print_dc_check_report(&report, json)?;
+        }
+        Commands::Network { action } => {
+            handle_network(action.unwrap_or(NetworkAction::Current), &config_path, explicit_config, json)?;
         }
         Commands::Dns { action } => {
             handle_dns(action.unwrap_or(DnsAction::Status), &config_path, explicit_config, json)?;
@@ -645,6 +696,7 @@ fn build_status_report_with_querier(
     cfg: &NetfixConfig,
     mut query: impl FnMut(&str) -> ServiceStatus,
 ) -> StatusReport {
+    let (active_strategy, strategy_key, is_custom) = resolve_strategy_for_config(cfg);
     let dpi = matches!(target, ServiceTarget::All | ServiceTarget::Dpi).then(|| {
         let bin_name = match cfg.dpi.engine {
             DpiEngineKind::Nfqws => "nfqws",
@@ -655,8 +707,13 @@ fn build_status_report_with_querier(
             enabled_in_config: cfg.dpi.enabled,
             engine: cfg.dpi.engine,
             ciadpi_mode: cfg.dpi.ciadpi_mode,
-            active_strategy: resolve_active_strategy(cfg).to_string(),
+            active_strategy: active_strategy.to_string(),
             engine_binary_found: find_engine_binary(bin_name).is_ok(),
+            strategy_source: if is_custom {
+                format!("profile '{strategy_key}'")
+            } else {
+                "default".to_string()
+            },
         }
     });
 
@@ -669,6 +726,8 @@ fn build_status_report_with_querier(
         pinned_cf_domain: cfg.tgproxy.pinned_cf_domain.clone(),
     });
 
+    let network = detect_current_network_info(cfg);
+
     StatusReport {
         target,
         config_path: config_path.display().to_string(),
@@ -676,6 +735,7 @@ fn build_status_report_with_querier(
         dpi,
         tgproxy,
         dns_mode: cfg.dns.mode,
+        network,
     }
 }
 
@@ -694,82 +754,101 @@ fn apply_winning_strategy(cfg: &mut NetfixConfig, engine: DpiEngineKind, strateg
     }
 }
 
-fn detect_active_network_key(cfg: &NetfixConfig) -> String {
-    if let Some(ref override_net) = cfg.general.active_network_override {
-        let trimmed = override_net.trim();
-        if !trimmed.is_empty() {
-            return normalize_network_key(trimmed);
+fn handle_network(
+    action: NetworkAction,
+    config_path: &Path,
+    explicit_config: bool,
+    json: bool,
+) -> Result<(), NetfixError> {
+    let (mut cfg, _) = load_config_for_inspection(config_path, explicit_config)?;
+    match action {
+        NetworkAction::Current => {
+            let info = detect_current_network_info(&cfg);
+            let (strat, key, is_custom) = resolve_strategy_for_config(&cfg);
+            if json {
+                print_json(&serde_json::json!({
+                    "network": info,
+                    "engine": cfg.dpi.engine,
+                    "active_strategy": strat,
+                    "strategy_source": if is_custom { "network_profile" } else { "default" },
+                    "strategy_profile": key,
+                }))?;
+            } else {
+                println!("Current network key: {}", info.key);
+                if let Some(ref ssid) = info.ssid {
+                    println!("Wi-Fi SSID: {ssid}");
+                }
+                if let Some(ref conn) = info.connection_name {
+                    println!("Connection: {conn}");
+                }
+                if let Some(ref iface) = info.interface {
+                    println!("Interface: {iface}");
+                }
+                println!(
+                    "Profile mode: {}",
+                    if info.is_override {
+                        "override"
+                    } else {
+                        "auto-detected"
+                    }
+                );
+                println!("Engine: {:?}", cfg.dpi.engine);
+                println!(
+                    "Active strategy: {strat} ({})",
+                    if is_custom {
+                        format!("profile '{key}'")
+                    } else {
+                        "default fallback".to_string()
+                    }
+                );
+            }
         }
-    }
-
-    if let Some(ssid) = detect_wifi_ssid() {
-        return normalize_network_key(&ssid);
-    }
-
-    if let Some(iface) = detect_default_route_interface() {
-        return normalize_network_key(&iface);
-    }
-
-    "default".to_string()
-}
-
-fn detect_wifi_ssid() -> Option<String> {
-    let out = Command::new("iwgetid").arg("-r").output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let ssid = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!ssid.is_empty()).then_some(ssid)
-}
-
-fn detect_default_route_interface() -> Option<String> {
-    if let Ok(out) = Command::new("ip")
-        .args(["route", "get", "1.1.1.1"])
-        .output()
-    {
-        if out.status.success() {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            if let Some(iface) = parse_ip_route_get_dev(&stdout) {
-                return Some(iface);
+        NetworkAction::List => {
+            let info = detect_current_network_info(&cfg);
+            if json {
+                print_json(&serde_json::json!({
+                    "current_network": info.key,
+                    "profiles": cfg.dpi.network_strategies,
+                }))?;
+            } else {
+                println!("Saved network profiles in {}:", config_path.display());
+                if cfg.dpi.network_strategies.is_empty() {
+                    println!("  (no custom network profiles saved yet; run 'netfixctl scan --apply' to save one)");
+                } else {
+                    for (k, v) in &cfg.dpi.network_strategies {
+                        let is_cur = if k == &info.key { " [active]" } else { "" };
+                        println!("- {k}{is_cur}:");
+                        if let Some(ref s) = v.nfqws {
+                            println!("    nfqws:  {s}");
+                        }
+                        if let Some(ref s) = v.ciadpi {
+                            println!("    ciadpi: {s}");
+                        }
+                    }
+                }
+            }
+        }
+        NetworkAction::Switch { profile } => {
+            let trimmed = profile.trim();
+            if trimmed == "auto" {
+                cfg.general.active_network_override = None;
+                cfg.save(config_path)?;
+                println!("Reset active network profile override to auto-detection.");
+            } else {
+                let norm = normalize_network_key(trimmed);
+                cfg.general.active_network_override = Some(norm.clone());
+                cfg.save(config_path)?;
+                println!("Switched active network profile override to '{norm}'.");
+            }
+            if is_systemd_unit_active(DPI_SERVICE) {
+                println!("Restarting netfix-dpi.service to apply new network strategy...");
+                let _ = Command::new("systemctl")
+                    .args(["restart", DPI_SERVICE])
+                    .status();
             }
         }
     }
-
-    if let Ok(route_table) = std::fs::read_to_string("/proc/net/route") {
-        return parse_proc_net_route_default_iface(&route_table);
-    }
-
-    None
-}
-
-fn parse_ip_route_get_dev(output: &str) -> Option<String> {
-    let mut tokens = output.split_whitespace();
-    while let Some(tok) = tokens.next() {
-        if tok == "dev" {
-            return tokens
-                .next()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string);
-        }
-    }
-    None
-}
-
-fn parse_proc_net_route_default_iface(route_table: &str) -> Option<String> {
-    for line in route_table.lines().skip(1) {
-        let mut fields = line.split_whitespace();
-        let Some(iface) = fields.next() else {
-            continue;
-        };
-        let Some(dest) = fields.next() else {
-            continue;
-        };
-        if dest == "00000000" && !iface.is_empty() {
-            return Some(iface.to_string());
-        }
-    }
-    None
+    Ok(())
 }
 
 fn handle_dns(
@@ -1029,6 +1108,30 @@ fn print_setup_report(report: &SetupReport, json: bool) -> Result<(), NetfixErro
     Ok(())
 }
 
+fn print_uninstall_report(report: &UninstallReport, json: bool) -> Result<(), NetfixError> {
+    if json {
+        return print_json(report);
+    }
+    println!("Units removed: {}", report.units_removed.len());
+    println!("Engines removed: {}", report.engines_removed.len());
+    println!("Config removed: {}", report.config_removed);
+    println!("State removed: {}", report.state_removed);
+    if report.dns_reset {
+        println!("DNS reset: ok");
+    }
+    if report.hosts_reset {
+        println!("Hosts reset: ok");
+    }
+    println!(
+        "systemd daemon-reload: {}",
+        if report.daemon_reloaded { "ok" } else { "skipped" }
+    );
+    for warning in &report.warnings {
+        eprintln!("warning: {warning}");
+    }
+    Ok(())
+}
+
 fn print_status_report(report: &StatusReport, json: bool) -> Result<(), NetfixError> {
     if json {
         return print_json(report);
@@ -1042,9 +1145,18 @@ fn print_status_report(report: &StatusReport, json: bool) -> Result<(), NetfixEr
             "default (not yet created)"
         }
     );
+    println!(
+        "Network profile: {} ({})",
+        report.network.key,
+        if report.network.is_override {
+            "override"
+        } else {
+            "auto-detected"
+        }
+    );
     if let Some(ref dpi) = report.dpi {
         println!(
-            "DPI ({}): active={:?}, enabled={:?}, engine={:?}, mode={:?}, binary={}, strategy={}",
+            "DPI ({}): active={:?}, enabled={:?}, engine={:?}, mode={:?}, binary={}, strategy={} [{}]",
             dpi.service.unit,
             dpi.service.active,
             dpi.service.enabled,
@@ -1055,7 +1167,8 @@ fn print_status_report(report: &StatusReport, json: bool) -> Result<(), NetfixEr
             } else {
                 "missing"
             },
-            dpi.active_strategy
+            dpi.active_strategy,
+            dpi.strategy_source
         );
     }
     if let Some(ref tgproxy) = report.tgproxy {
@@ -1279,6 +1392,52 @@ mod tests {
                 .command,
             Commands::DpiCleanup
         ));
+        assert!(matches!(
+            Cli::try_parse_from(["netfixctl", "enable", "tg"])
+                .unwrap()
+                .command,
+            Commands::Enable {
+                target: ServiceTarget::Tg
+            }
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["netfixctl", "disable"])
+                .unwrap()
+                .command,
+            Commands::Disable {
+                target: ServiceTarget::All
+            }
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["netfixctl", "uninstall", "--purge"])
+                .unwrap()
+                .command,
+            Commands::Uninstall { purge: true }
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["netfixctl", "network", "current"])
+                .unwrap()
+                .command,
+            Commands::Network {
+                action: Some(NetworkAction::Current)
+            }
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["netfixctl", "network", "list"])
+                .unwrap()
+                .command,
+            Commands::Network {
+                action: Some(NetworkAction::List)
+            }
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["netfixctl", "network", "switch", "home_wifi"])
+                .unwrap()
+                .command,
+            Commands::Network {
+                action: Some(NetworkAction::Switch { .. })
+            }
+        ));
     }
 
     #[test]
@@ -1308,6 +1467,7 @@ mod tests {
         assert_eq!(json["dpi"]["service"]["active"], "unknown");
         assert_eq!(json["dpi"]["engine"], "ciadpi");
         assert_eq!(json["tgproxy"]["port"], 2443);
+        assert!(json["network"]["key"].is_string());
 
         // Also ensure real query_systemd_unit does not panic even when systemctl is absent/inactive.
         let real = query_systemd_unit("netfix-nonexistent.service");
@@ -1418,6 +1578,7 @@ mod tests {
 
     #[test]
     fn test_route_interface_parsers_and_network_key_fallback() {
+        use netfix_core::network::{parse_ip_route_get_dev, parse_proc_net_route_default_iface};
         assert_eq!(
             parse_ip_route_get_dev("1.1.1.1 via 192.168.1.1 dev wlan0 src 192.168.1.42 uid 1000"),
             Some("wlan0".to_string())
