@@ -312,7 +312,6 @@ Summary:        NetFix Linux headless client
 License:        MIT or Apache-2.0
 URL:            https://github.com/FlyingBober/NetFixMobile
 Source0:        netfix-${VERSION}.tar.gz
-BuildArch:      ${RPM_ARCH}
 
 Requires:       systemd, iproute
 Suggests:       nftables, iptables
@@ -386,7 +385,7 @@ fi
 - Initial release of NetFix Linux headless client
 EOF
 
-        rpmbuild -bb --define "_topdir ${RPM_TOP}" "${SPEC_FILE}" >/dev/null
+        rpmbuild --target "${RPM_ARCH}" -bb --define "_topdir ${RPM_TOP}" "${SPEC_FILE}" >/dev/null
         GENERATED_RPM=$(find "${RPM_TOP}/RPMS" -name "*.rpm" -type f | head -n1)
         if [[ -f "${GENERATED_RPM}" ]]; then
             RPM_DEST="${DIST_DIR}/netfix-${VERSION}-1.${RPM_ARCH}.rpm"
