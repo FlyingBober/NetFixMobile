@@ -787,7 +787,7 @@ pub async fn tcp_fallback(
     let _ = remote.set_nodelay(true);
 
     STATS.connections_tcp_fallback.fetch_add(1, Ordering::Relaxed);
-    linfo!(" DC{}{} подключен по TCP", dc, media_tag(is_media));
+    ldebug!(" DC{}{} подключен по TCP", dc, media_tag(is_media));
     if remote.write_all(init).await.is_err() {
         return false;
     }
@@ -1176,7 +1176,7 @@ async fn cfproxy_acquire_ws(
         Some(w) => {
             if !chosen_domain.is_empty() {
                 if crate::balancer::BALANCER.write().update_domain_for_dc(dc, &chosen_domain) {
-                    linfo!(" CF домен для DC{} -> {}", dc, chosen_domain);
+                    ldebug!(" CF домен для DC{} -> {}", dc, chosen_domain);
                 }
             }
             Some((w, chosen_domain))
@@ -1270,7 +1270,7 @@ async fn try_cf_bridge(
             continue;
         }
         STATS.connections_cfproxy.fetch_add(1, Ordering::Relaxed);
-        linfo!(" DC{}{} подключен через CF", dc, media_tag(is_media));
+        ldebug!(" DC{}{} подключен через CF", dc, media_tag(is_media));
 
         match bridge_ws_with_retry(
             conn,
@@ -1316,7 +1316,7 @@ async fn try_cf_bridge(
         if ws.send(relay_init).await.is_ok() {
             cf_pool_refill_async(dc);
             STATS.connections_cfproxy.fetch_add(1, Ordering::Relaxed);
-            linfo!(" DC{}{} подключен через CF", dc, media_tag(is_media));
+            ldebug!(" DC{}{} подключен через CF", dc, media_tag(is_media));
 
             let _ = bridge_ws_with_retry(
                 conn,
@@ -2030,7 +2030,7 @@ pub async fn run_proxy(
             tokio::select! {
                 _ = cancel_stats.cancelled() => return,
                 _ = interval.tick() => {
-                    linfo!(" {}", STATS.summary_ru());
+                    ldebug!(" {}", STATS.summary_ru());
                 }
             }
         }
