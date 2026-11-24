@@ -1,0 +1,168 @@
+name: Release Linux Client
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (leave empty for current tag or git rev)'
+        required: false
+        default: ''
+      draft:
+        description: 'Publish as draft release'
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Publish as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-packages:
+    name: Build (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: x86_64
+            deb_arch: amd64
+            rpm_arch: x86_64
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            arch: aarch64
+            deb_arch: arm64
+            rpm_arch: aarch64
+            cross: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve Version
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            VER="${{ github.event.inputs.tag }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VER="${GITHUB_REF#refs/tags/}"
+          else
+            VER=$(grep -m1 '^version = ' linux/crates/netfixctl/Cargo.toml | cut -d'"' -f2)
+            VER="v${VER:-0.1.0}"
+          fi
+          echo "tag=${VER}" >> $GITHUB_OUTPUT
+          echo "raw=${VER#v}" >> $GITHUB_OUTPUT
+
+      - name: Install System Packaging Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm dpkg-dev
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          fi
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            linux -> target
+            native/tgproxy-rust -> target
+
+      - name: Configure Cargo Linker for Cross-Compilation
+        if: matrix.cross
+        shell: bash
+        run: |
+          mkdir -p ~/.cargo
+          printf '[target.aarch64-unknown-linux-gnu]\nlinker = "aarch64-linux-gnu-gcc"\n' >> ~/.cargo/config.toml
+
+      - name: Build Release Binaries
+        shell: bash
+        working-directory: linux
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }} --workspace
+          mkdir -p target/release
+          cp -p target/${{ matrix.target }}/release/netfixctl target/release/
+          cp -p target/${{ matrix.target }}/release/netfix-tgproxy target/release/
+
+      - name: Package (.tar.gz, .deb, .rpm)
+        shell: bash
+        run: |
+          chmod +x linux/package.sh
+          ./linux/package.sh \
+            --version "${{ steps.version.outputs.raw }}" \
+            --arch "${{ matrix.arch }}" \
+            --dist-dir "linux/dist-${{ matrix.arch }}" \
+            --all
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: netfix-packages-${{ matrix.arch }}
+          path: linux/dist-${{ matrix.arch }}/*
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Resolve Version
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            VER="${{ github.event.inputs.tag }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VER="${GITHUB_REF#refs/tags/}"
+          else
+            VER=$(grep -m1 '^version = ' linux/crates/netfixctl/Cargo.toml | cut -d'"' -f2)
+            VER="v${VER:-0.1.0}"
+          fi
+          echo "tag=${VER}" >> $GITHUB_OUTPUT
+          echo "raw=${VER#v}" >> $GITHUB_OUTPUT
+
+      - name: Download all built packages
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
+      - name: Prepare Release Directory & Checksums
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          find all-artifacts -type f \( -name "*.tar.gz" -o -name "*.deb" -o -name "*.rpm" \) -exec cp {} release-assets/ \;
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
+          echo "=== Release Assets ==="
+          ls -lh
+          echo "=== Checksums ==="
+          cat SHA256SUMS.txt
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: NetFix Linux ${{ steps.version.outputs.tag }}
+          files: release-assets/*
+          draft: ${{ github.event.inputs.draft || false }}
+          prerelease: ${{ github.event.inputs.prerelease || false }}
+          generate_release_notes: true

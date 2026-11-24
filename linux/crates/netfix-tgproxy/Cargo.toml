@@ -1,0 +1,12 @@
+[package]
+name = "netfix-tgproxy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tgwsproxy = { path = "../../../native/tgproxy-rust" }
+netfix-core = { path = "../netfix-core" }
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"

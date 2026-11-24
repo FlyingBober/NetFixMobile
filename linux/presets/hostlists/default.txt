@@ -1,0 +1,46 @@
+# Default hostlist for NetFix DPI bypass
+# YouTube & GoogleVideo
+youtube.com
+youtu.be
+ytimg.com
+i.ytimg.com
+s.ytimg.com
+yt3.ggpht.com
+yt3.googleusercontent.com
+googlevideo.com
+redirector.googlevideo.com
+youtubei.googleapis.com
+youtube-nocookie.com
+youtubekids.com
+ggpht.com
+googleusercontent.com
+
+# Discord
+discord.com
+discordapp.com
+discordapp.net
+discord.gg
+discord.media
+discordcdn.com
+discordstatus.com
+gateway.discord.gg
+cdn.discordapp.com
+media.discordapp.net
+
+# AI Services
+openai.com
+chatgpt.com
+auth.openai.com
+cdn.oaistatic.com
+oaiusercontent.com
+anthropic.com
+claude.ai
+gemini.google.com
+aistudio.google.com
+generativelanguage.googleapis.com
+perplexity.ai
+x.ai
+grok.com
+
+# Cloudflare / Diagnostics
+cloudflare-ech.com

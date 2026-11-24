@@ -1,0 +1,19 @@
+[Unit]
+Description=NetFix Telegram MTProto-over-WebSocket Proxy
+After=network-online.target
+Wants=network-online.target
+PartOf=netfix.target
+
+[Service]
+Type=simple
+User=netfix
+Group=netfix
+ExecStart=/usr/local/bin/netfix-tgproxy --config /etc/netfix/config.toml
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/netfix/tgproxy
+
+[Install]
+WantedBy=multi-user.target
