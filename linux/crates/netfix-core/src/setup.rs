@@ -65,6 +65,7 @@ impl SetupPaths {
 pub struct SetupOptions {
     pub from_local: Option<PathBuf>,
     pub skip_download: bool,
+    pub skip_units: bool,
     pub prefix: Option<PathBuf>,
 }
 
@@ -263,6 +264,30 @@ pub fn provision_layout(
     paths: &SetupPaths,
     is_system: bool,
 ) -> Result<(bool, Vec<PathBuf>), NetfixError> {
+    provision_layout_with_opts(paths, is_system, false)
+}
+
+fn resolve_installed_bin_dir(is_system: bool) -> &'static str {
+    if is_system {
+        if let Ok(exe) = std::env::current_exe() {
+            if exe.parent() == Some(Path::new("/usr/bin")) {
+                return "/usr/bin";
+            }
+        }
+        if !Path::new("/usr/local/bin/netfixctl").exists()
+            && Path::new("/usr/bin/netfixctl").exists()
+        {
+            return "/usr/bin";
+        }
+    }
+    "/usr/local/bin"
+}
+
+fn provision_layout_with_opts(
+    paths: &SetupPaths,
+    is_system: bool,
+    skip_units: bool,
+) -> Result<(bool, Vec<PathBuf>), NetfixError> {
     let netfix_ids = if is_system {
         crate::require_root("provision NetFix directories and systemd units")?;
         Some(ensure_netfix_system_user()?)
@@ -294,9 +319,17 @@ pub fn provision_layout(
         apply_system_ownership(paths, uid, gid)?;
     }
 
+    if skip_units {
+        return Ok((config_created, Vec::new()));
+    }
+
+    let bin_dir = resolve_installed_bin_dir(is_system);
+    let dpi_unit = NETFIX_DPI_SERVICE_UNIT.replace("/usr/local/bin/", &format!("{bin_dir}/"));
+    let tg_unit = NETFIX_TGPROXY_SERVICE_UNIT.replace("/usr/local/bin/", &format!("{bin_dir}/"));
+
     let unit_specs = [
-        ("netfix-dpi.service", NETFIX_DPI_SERVICE_UNIT),
-        ("netfix-tgproxy.service", NETFIX_TGPROXY_SERVICE_UNIT),
+        ("netfix-dpi.service", dpi_unit.as_str()),
+        ("netfix-tgproxy.service", tg_unit.as_str()),
         ("netfix.target", NETFIX_TARGET_UNIT),
     ];
     let mut units_installed = Vec::with_capacity(unit_specs.len());
@@ -379,7 +412,8 @@ pub async fn run_setup(opts: &SetupOptions) -> Result<SetupReport, NetfixError> 
         None => SetupPaths::system(),
     };
 
-    let (config_created, units_installed) = provision_layout(&paths, is_system)?;
+    let (config_created, units_installed) =
+        provision_layout_with_opts(&paths, is_system, opts.skip_units)?;
     let mut warnings = Vec::new();
 
     if let Some(ref local_dir) = opts.from_local {
@@ -1496,6 +1530,7 @@ mod tests {
         let err = run_setup(&SetupOptions {
             from_local: None,
             skip_download: true,
+            skip_units: false,
             prefix: None,
         })
         .await
@@ -1615,6 +1650,7 @@ mod tests {
         let setup_report = run_setup(&SetupOptions {
             from_local: Some(src_dir),
             skip_download: true,
+            skip_units: false,
             prefix: Some(prefix.clone()),
         })
         .await

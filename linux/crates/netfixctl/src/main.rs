@@ -96,6 +96,8 @@ pub enum Commands {
         from_local: Option<PathBuf>,
         #[arg(long)]
         skip_download: bool,
+        #[arg(long)]
+        skip_units: bool,
     },
     /// Start NetFix systemd service(s)
     Start {
@@ -377,10 +379,12 @@ async fn dispatch(cli: Cli) -> Result<(), NetfixError> {
         Commands::Setup {
             from_local,
             skip_download,
+            skip_units,
         } => {
             let report = run_setup(&SetupOptions {
                 from_local,
                 skip_download,
+                skip_units,
                 prefix: None,
             })
             .await?;
@@ -1372,7 +1376,8 @@ mod tests {
             setup.command,
             Commands::Setup {
                 from_local: Some(_),
-                skip_download: true
+                skip_download: true,
+                skip_units: false,
             }
         ));
 
