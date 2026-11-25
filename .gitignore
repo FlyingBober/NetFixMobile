@@ -15,5 +15,6 @@ RELEASE_*.md
 TELEGRAM_POST_*.md
 linux/target/
 linux/dist/
+linux/crates/*/gen/
 native/tgproxy-rust/target/
 .superpowers/

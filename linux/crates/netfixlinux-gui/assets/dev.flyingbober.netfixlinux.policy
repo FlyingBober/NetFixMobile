@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>NetFixLinux</vendor>
+  <vendor_url>https://github.com/FlyingBober/NetFixMobile</vendor_url>
+  <action id="dev.flyingbober.netfixlinux.tun">
+    <description>Run NetFixLinux Network Tunnel</description>
+    <message>Authentication is required to configure virtual network tunnel</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/netfixlinux-tun</annotate>
+  </action>
+  <action id="dev.flyingbober.netfixlinux.ctl.local">
+    <description>Manage NetFixLinux DPI and Proxy Services (local)</description>
+    <message>Authentication is required to manage NetFixLinux services</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/netfixctl</annotate>
+  </action>
+  <action id="dev.flyingbober.netfixlinux.ctl.usr">
+    <description>Manage NetFixLinux DPI and Proxy Services</description>
+    <message>Authentication is required to manage NetFixLinux services</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/netfixctl</annotate>
+  </action>
+</policyconfig>
