@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 VERSION=""
+VERSION_EXPLICIT=0
 ARCH="$(uname -m)"
 DIST_DIR="${SCRIPT_DIR}/dist"
 DO_TAR=0
@@ -40,6 +41,7 @@ while [[ $# -gt 0 ]]; do
         --version)
             [[ $# -ge 2 ]] || { echo "error: --version requires an argument" >&2; exit 2; }
             VERSION="$2"
+            VERSION_EXPLICIT=1
             shift 2
             ;;
         --arch)
@@ -435,8 +437,12 @@ fi # End of BUILD_HEADLESS
 
 # === NetFixLinux GUI Packaging ===
 if [[ "${BUILD_GUI}" -eq 1 ]]; then
-    GUI_VERSION=$(grep -m1 '^version = ' "${SCRIPT_DIR}/crates/netfixlinux-gui/Cargo.toml" | cut -d'"' -f2 || true)
-    [[ -n "${GUI_VERSION}" ]] || GUI_VERSION="${VERSION}"
+    if [[ "${VERSION_EXPLICIT}" -eq 1 ]]; then
+        GUI_VERSION="${VERSION}"
+    else
+        GUI_VERSION=$(grep -m1 '^version = ' "${SCRIPT_DIR}/crates/netfixlinux-gui/Cargo.toml" | cut -d'"' -f2 || true)
+        [[ -n "${GUI_VERSION}" ]] || GUI_VERSION="${VERSION}"
+    fi
     GUI_VERSION="${GUI_VERSION#v}"
 
     echo "=== Packaging NetFixLinux GUI v${GUI_VERSION} (${PKG_ARCH}) ==="
