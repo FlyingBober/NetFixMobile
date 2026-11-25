@@ -6,10 +6,10 @@ PURGE=0
 
 usage() {
     cat <<'EOF'
-NetFix Linux Headless uninstaller
+NetFixLinux Uninstaller
 
 Usage:
-  ./linux/uninstall.sh [options]
+  ./uninstall.sh [options]
 
 Options:
   --purge            Also remove /etc/netfix, /var/lib/netfix, reset DNS/hosts, and delete user 'netfix'
@@ -51,6 +51,7 @@ run_as_root() {
 
 CTL_BIN="${BIN_DIR}/netfixctl"
 TG_BIN="${BIN_DIR}/netfix-tgproxy"
+GUI_BIN="${BIN_DIR}/netfixlinux-gui"
 
 if [[ -x "${CTL_BIN}" ]]; then
     UNINSTALL_ARGS=(uninstall)
@@ -74,7 +75,13 @@ else
     fi
 fi
 
-run_as_root rm -f "${CTL_BIN}" "${TG_BIN}"
+run_as_root rm -f "${CTL_BIN}" "${TG_BIN}" "${GUI_BIN}"
+run_as_root rm -f \
+    /usr/share/applications/dev.flyingbober.netfixlinux.desktop \
+    /usr/share/polkit-1/actions/dev.flyingbober.netfixlinux.policy \
+    /usr/share/icons/hicolor/32x32/apps/dev.flyingbober.netfixlinux.png \
+    /usr/share/icons/hicolor/128x128/apps/dev.flyingbober.netfixlinux.png \
+    /usr/share/icons/hicolor/512x512/apps/dev.flyingbober.netfixlinux.png
 
 if [[ "${PURGE}" -eq 1 ]] && id netfix >/dev/null 2>&1; then
     if command -v userdel >/dev/null 2>&1; then
@@ -82,4 +89,4 @@ if [[ "${PURGE}" -eq 1 ]] && id netfix >/dev/null 2>&1; then
     fi
 fi
 
-echo "NetFix Linux uninstalled (purge=${PURGE})."
+echo "NetFixLinux uninstalled (purge=${PURGE})."

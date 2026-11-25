@@ -11,15 +11,15 @@ DO_START=0
 
 usage() {
     cat <<'EOF'
-NetFix Linux Headless installer
+NetFixLinux Installer (CLI / Daemons + optional Desktop GUI)
 
 Usage:
-  ./linux/install.sh [options]
+  ./install.sh [options]
 
 Options:
   --from-local <dir>   Pass pre-downloaded nfqws/ciadpi directory to `netfixctl setup`
   --skip-download      Do not download missing nfqws/ciadpi binaries from GitHub
-  --no-build           Install prebuilt binaries from linux/target/release without compiling
+  --no-build           Install prebuilt binaries without compiling
   --enable             Enable systemd autostart (`netfixctl enable all`)
   --start              Start services after setup (`netfixctl start all`)
   --bin-dir <dir>      Target bin directory (default: /usr/local/bin)
@@ -87,14 +87,17 @@ find_prebuilt_binaries() {
     if [[ -x "${SCRIPT_DIR}/bin/netfixctl" && -x "${SCRIPT_DIR}/bin/netfix-tgproxy" ]]; then
         CTL_BIN="${SCRIPT_DIR}/bin/netfixctl"
         TG_BIN="${SCRIPT_DIR}/bin/netfix-tgproxy"
+        [[ -x "${SCRIPT_DIR}/bin/netfixlinux-gui" ]] && GUI_BIN="${SCRIPT_DIR}/bin/netfixlinux-gui"
         return 0
     elif [[ -x "${SCRIPT_DIR}/netfixctl" && -x "${SCRIPT_DIR}/netfix-tgproxy" ]]; then
         CTL_BIN="${SCRIPT_DIR}/netfixctl"
         TG_BIN="${SCRIPT_DIR}/netfix-tgproxy"
+        [[ -x "${SCRIPT_DIR}/netfixlinux-gui" ]] && GUI_BIN="${SCRIPT_DIR}/netfixlinux-gui"
         return 0
     elif [[ -x "${SCRIPT_DIR}/target/release/netfixctl" && -x "${SCRIPT_DIR}/target/release/netfix-tgproxy" ]]; then
         CTL_BIN="${SCRIPT_DIR}/target/release/netfixctl"
         TG_BIN="${SCRIPT_DIR}/target/release/netfix-tgproxy"
+        [[ -x "${SCRIPT_DIR}/target/release/netfixlinux-gui" ]] && GUI_BIN="${SCRIPT_DIR}/target/release/netfixlinux-gui"
         return 0
     fi
     return 1
@@ -102,6 +105,7 @@ find_prebuilt_binaries() {
 
 CTL_BIN=""
 TG_BIN=""
+GUI_BIN=""
 
 if [[ "${NO_BUILD}" -eq 0 ]]; then
     if find_prebuilt_binaries; then
@@ -151,10 +155,43 @@ run_as_root install -d -m 0755 "${BIN_DIR}"
 run_as_root install -m 0755 "${CTL_BIN}" "${BIN_DIR}/netfixctl"
 run_as_root install -m 0755 "${TG_BIN}" "${BIN_DIR}/netfix-tgproxy"
 
+if [[ -n "${GUI_BIN}" && -x "${GUI_BIN}" ]]; then
+    echo "    Installing NetFixLinux Desktop GUI..."
+    run_as_root install -m 0755 "${GUI_BIN}" "${BIN_DIR}/netfixlinux-gui"
+
+    DESKTOP_SRC="${SCRIPT_DIR}/share/applications/dev.flyingbober.netfixlinux.desktop"
+    [[ -f "${DESKTOP_SRC}" ]] || DESKTOP_SRC="${SCRIPT_DIR}/crates/netfixlinux-gui/assets/dev.flyingbober.netfixlinux.desktop"
+    if [[ -f "${DESKTOP_SRC}" ]]; then
+        run_as_root install -d -m 0755 /usr/share/applications
+        TMP_DESKTOP="$(mktemp)"
+        sed "s|^Exec=.*|Exec=${BIN_DIR}/netfixlinux-gui|" "${DESKTOP_SRC}" > "${TMP_DESKTOP}"
+        run_as_root install -m 0644 "${TMP_DESKTOP}" /usr/share/applications/dev.flyingbober.netfixlinux.desktop
+        rm -f "${TMP_DESKTOP}"
+    fi
+
+    POLICY_SRC="${SCRIPT_DIR}/share/polkit-1/actions/dev.flyingbober.netfixlinux.policy"
+    [[ -f "${POLICY_SRC}" ]] || POLICY_SRC="${SCRIPT_DIR}/crates/netfixlinux-gui/assets/dev.flyingbober.netfixlinux.policy"
+    if [[ -f "${POLICY_SRC}" ]]; then
+        run_as_root install -d -m 0755 /usr/share/polkit-1/actions
+        run_as_root install -m 0644 "${POLICY_SRC}" /usr/share/polkit-1/actions/dev.flyingbober.netfixlinux.policy
+    fi
+
+    for size in 32x32 128x128 512x512; do
+        ICON_SRC="${SCRIPT_DIR}/share/icons/hicolor/${size}/apps/dev.flyingbober.netfixlinux.png"
+        [[ -f "${ICON_SRC}" ]] || ICON_SRC="${SCRIPT_DIR}/crates/netfixlinux-gui/icons/${size}.png"
+        if [[ -f "${ICON_SRC}" ]]; then
+            run_as_root install -d -m 0755 "/usr/share/icons/hicolor/${size}/apps"
+            run_as_root install -m 0644 "${ICON_SRC}" "/usr/share/icons/hicolor/${size}/apps/dev.flyingbober.netfixlinux.png"
+        fi
+    done
+fi
+
 echo "[3/4] Running netfixctl setup..."
 SETUP_ARGS=(setup)
 if [[ -n "${FROM_LOCAL}" ]]; then
     SETUP_ARGS+=(--from-local "${FROM_LOCAL}")
+elif [[ -x "${SCRIPT_DIR}/engines/nfqws" || -x "${SCRIPT_DIR}/engines/ciadpi" ]]; then
+    SETUP_ARGS+=(--from-local "${SCRIPT_DIR}/engines")
 fi
 if [[ "${SKIP_DOWNLOAD}" -eq 1 ]]; then
     SETUP_ARGS+=(--skip-download)
@@ -170,9 +207,12 @@ if [[ "${DO_START}" -eq 1 ]]; then
 fi
 
 echo
-echo "NetFix Linux installed successfully."
+echo "NetFixLinux installed successfully."
 echo "Next steps:"
-echo "  1. Check status:        sudo netfixctl status"
-echo "  2. Auto-pick DPI rules: sudo netfixctl scan --engine nfqws --apply"
-echo "  3. Enable & start:      sudo netfixctl enable all && sudo netfixctl start all"
-echo "  4. Telegram proxy link: sudo netfixctl tg link"
+if [[ -x "${BIN_DIR}/netfixlinux-gui" ]]; then
+    echo "  - Launch GUI:           ${BIN_DIR}/netfixlinux-gui"
+fi
+echo "  - Check status:         sudo netfixctl status"
+echo "  - Auto-pick DPI rules:  sudo netfixctl scan --engine nfqws --apply"
+echo "  - Enable & start:       sudo netfixctl enable all && sudo netfixctl start all"
+echo "  - Telegram proxy link:  sudo netfixctl tg link"

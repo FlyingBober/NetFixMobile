@@ -108,14 +108,17 @@ jobs:
 
       - name: Package (.tar.gz, .deb, .rpm)
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          chmod +x linux/package.sh
+          chmod +x linux/package.sh linux/fetch-engines.py linux/install.sh linux/uninstall.sh
           if [ "${{ matrix.cross }}" = "true" ]; then
             ./linux/package.sh \
               --version "${{ steps.version.outputs.raw }}" \
               --arch "${{ matrix.arch }}" \
               --dist-dir "linux/dist-${{ matrix.arch }}" \
-              --headless \
+              --core \
+              --fetch-engines \
               --all
           else
             ./linux/package.sh \
@@ -123,6 +126,7 @@ jobs:
               --arch "${{ matrix.arch }}" \
               --dist-dir "linux/dist-${{ matrix.arch }}" \
               --with-gui \
+              --fetch-engines \
               --all
           fi
 
