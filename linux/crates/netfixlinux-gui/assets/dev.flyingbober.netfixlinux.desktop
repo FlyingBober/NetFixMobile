@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=NetFixLinux
+GenericName=Bypass DPI & TG Proxy
+Comment=NetFixLinux — Desktop Client (fork of NetFix Mobile by rupleide)
+Exec=netfixlinux-gui
+Icon=dev.flyingbober.netfixlinux
+Terminal=false
+Type=Application
+Categories=Network;Proxy;Security;
+Keywords=dpi;proxy;telegram;byedpi;zapret;netfixlinux;
+StartupNotify=true
+StartupWMClass=dev.flyingbober.netfixlinux

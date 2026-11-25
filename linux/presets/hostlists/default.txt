@@ -23,9 +23,14 @@ discord.gg
 discord.media
 discordcdn.com
 discordstatus.com
+updates.discord.com
+dl.discordapp.net
+status.discord.com
 gateway.discord.gg
+remote-auth-gateway.discord.gg
 cdn.discordapp.com
 media.discordapp.net
+latency.discord.media
 
 # AI Services
 openai.com

@@ -1,0 +1,2403 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NetFixLinux — (fork of NetFix Mobile by rupleide)</title>
+  <style>
+    :root {
+      --bg: #0b101b;
+      --sidebar-bg: #0f1523;
+      --card-bg: #131b2c;
+      --card-border: #1e293b;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.25);
+      --success: #10b981;
+      --success-glow: rgba(16, 185, 129, 0.28);
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #e2e8f0;
+      --text-bright: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: "Noto Sans", "Ubuntu", "Inter", system-ui, -apple-system, sans-serif;
+      font-size: 13.5px;
+      font-weight: 400;
+      line-height: 1.55;
+      letter-spacing: 0.01em;
+      -webkit-font-smoothing: antialiased;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 224px;
+      min-width: 224px;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--card-border);
+      display: flex;
+      flex-direction: column;
+      padding: 16px 14px;
+      overflow-y: auto;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 4px 6px 18px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      margin-bottom: 18px;
+    }
+
+    .brand-icon {
+      width: 34px;
+      height: 34px;
+      flex-shrink: 0;
+      background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 600;
+      font-size: 17px;
+      box-shadow: 0 0 14px var(--accent-glow);
+    }
+
+    .brand-info h1 {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      color: var(--text-bright);
+      line-height: 1.25;
+    }
+
+    .brand-info p {
+      font-size: 10px;
+      font-weight: 400;
+      color: var(--text-dim);
+      line-height: 1.3;
+      margin-top: 3px;
+    }
+
+    .nav {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .nav-btn {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13.5px;
+      font-weight: 500;
+      transition: all 0.18s ease;
+      text-align: left;
+    }
+
+    .nav-btn:hover {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-bright);
+    }
+
+    .nav-btn.active {
+      background: rgba(56, 189, 248, 0.1);
+      border-color: rgba(56, 189, 248, 0.28);
+      color: var(--accent);
+    }
+
+    .sidebar-footer {
+      padding-top: 14px;
+      border-top: 1px solid rgba(255, 255, 255, 0.07);
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 10px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 7px;
+      font-size: 12px;
+    }
+
+    .status-pill-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-muted);
+    }
+
+    .status-pill-val {
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      flex-shrink: 0;
+    }
+
+    .status-dot.active {
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+
+    .status-dot.warn {
+      background: var(--warning);
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+    }
+
+    /* Content Area */
+    .main-view {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .topbar {
+      height: 54px;
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 24px;
+      background: var(--sidebar-bg);
+    }
+
+    .topbar-title {
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .topbar-network-val {
+      font-weight: 500;
+      color: var(--accent);
+    }
+
+    .topbar-latencies {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
+    .ping-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    .ping-val {
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+    }
+
+    .ping-badge.good .ping-val { color: #34d399; }
+    .ping-badge.med .ping-val { color: #fbbf24; }
+    .ping-badge.bad .ping-val { color: #f87171; }
+
+    .view-content {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 24px 28px;
+    }
+
+    /* Logs View must expand seamlessly in both axes */
+    #view-logs {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      padding: 18px 22px;
+      overflow: hidden;
+    }
+
+    /* Hero Toggle inside Sidebar */
+    .hero-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 0;
+    }
+
+    .hero-btn-wrap {
+      position: relative;
+      width: 146px;
+      height: 146px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Outline pulse ring (no solid fill) */
+    .pulse-ring {
+      position: absolute;
+      width: 132px;
+      height: 132px;
+      border-radius: 50%;
+      background: transparent;
+      border: 2px solid var(--success);
+      opacity: 0;
+      transform: scale(0.95);
+      pointer-events: none;
+    }
+
+    .pulse-ring.active {
+      animation: pulse-outline 2.2s infinite ease-out;
+    }
+
+    @keyframes pulse-outline {
+      0% { opacity: 0.65; transform: scale(1); }
+      70% { opacity: 0.15; transform: scale(1.28); }
+      100% { opacity: 0; transform: scale(1.42); }
+    }
+
+    /* Hollow / Transparent Hero Button without solid fill */
+    .hero-btn {
+      width: 132px;
+      height: 132px;
+      border-radius: 50%;
+      background: transparent;
+      border: 2px solid #334155;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+      z-index: 2;
+      font-family: inherit;
+    }
+
+    .hero-btn:hover {
+      transform: scale(1.03);
+      border-color: var(--accent);
+      color: var(--text-bright);
+      background: transparent;
+    }
+
+    .hero-btn.connected {
+      background: transparent;
+      border-color: var(--success);
+      color: #34d399;
+      box-shadow: 0 0 24px rgba(16, 185, 129, 0.25), inset 0 0 18px rgba(16, 185, 129, 0.08);
+    }
+
+    .hero-btn.needs-polkit {
+      background: transparent;
+      border-color: var(--warning);
+      color: #fbbf24;
+      box-shadow: 0 0 18px rgba(245, 158, 11, 0.18), inset 0 0 12px rgba(245, 158, 11, 0.05);
+    }
+
+    .hero-btn-icon {
+      font-size: 30px;
+      line-height: 1;
+    }
+
+    .hero-btn-text {
+      font-size: 12.5px;
+      font-weight: 600;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+
+    .hero-sub {
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    /* Cards Grid */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin-bottom: 22px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .card-head-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    /* Compact Header Toggle Switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 38px;
+      height: 21px;
+      flex-shrink: 0;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .switch-slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background-color: #334155;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      transition: 0.2s ease;
+      border-radius: 999px;
+    }
+
+    .switch-slider::before {
+      position: absolute;
+      content: "";
+      height: 15px;
+      width: 15px;
+      left: 2px;
+      bottom: 2px;
+      background-color: #e2e8f0;
+      transition: 0.2s ease;
+      border-radius: 50%;
+    }
+
+    .switch input:checked + .switch-slider {
+      background-color: rgba(16, 185, 129, 0.35);
+      border-color: var(--success);
+    }
+
+    .switch input:checked + .switch-slider::before {
+      transform: translateX(17px);
+      background-color: #34d399;
+    }
+
+    .switch input:disabled + .switch-slider {
+      opacity: 0.5;
+      cursor: wait;
+    }
+
+    .card-title {
+      font-size: 14.5px;
+      font-weight: 600;
+      color: var(--text-bright);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-badge {
+      font-size: 11.5px;
+      font-weight: 500;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-muted);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      white-space: nowrap;
+    }
+
+    .card-badge.active {
+      background: rgba(16, 185, 129, 0.12);
+      color: #34d399;
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+
+    .kv-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .kv-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 14px;
+      padding-bottom: 7px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 13px;
+    }
+
+    .kv-row:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .kv-label {
+      color: var(--text-muted);
+      font-weight: 400;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .kv-val {
+      color: var(--text-bright);
+      font-weight: 500;
+      text-align: right;
+      word-break: break-word;
+    }
+
+    .kv-val.mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      font-weight: 400;
+      color: #bae6fd;
+    }
+
+    /* Mode Selector */
+    .mode-section {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 18px 20px;
+    }
+
+    .mode-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .mode-radios {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .mode-card {
+      border: 1px solid var(--card-border);
+      border-radius: 9px;
+      padding: 14px;
+      cursor: pointer;
+      transition: all 0.18s;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .mode-card:hover {
+      border-color: rgba(56, 189, 248, 0.5);
+      background: rgba(56, 189, 248, 0.04);
+    }
+
+    .mode-card.active {
+      border-color: var(--accent);
+      background: rgba(56, 189, 248, 0.09);
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.12);
+    }
+
+    .mode-card-header {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .mode-card-desc {
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--text-muted);
+      line-height: 1.45;
+    }
+
+    /* Strategies View */
+    .strat-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .strat-header h2 {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 4px;
+    }
+
+    .strat-header p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .scan-panel {
+      display: none;
+      background: rgba(14, 165, 233, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin-bottom: 18px;
+    }
+
+    .scan-panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .scan-panel-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .scan-bar-bg {
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+
+    .scan-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #0ea5e9, #10b981);
+      border-radius: 999px;
+      transition: width 0.3s ease;
+    }
+
+    .scan-meta {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .strat-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .strat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      transition: all 0.18s;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .strat-card:hover {
+      border-color: rgba(56, 189, 248, 0.5);
+    }
+
+    .strat-card.active {
+      border-color: var(--success);
+      background: rgba(16, 185, 129, 0.06);
+    }
+
+    .strat-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .strat-info h3 {
+      font-size: 14.5px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 5px;
+    }
+
+    .strat-info p {
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      line-height: 1.45;
+    }
+
+    .tags {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 9px;
+      border-radius: 5px;
+      background: rgba(56, 189, 248, 0.1);
+      color: #7dd3fc;
+      border: 1px solid rgba(56, 189, 248, 0.22);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* Logs Terminal */
+    .terminal-container {
+      flex: 1;
+      width: 100%;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: #060913;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .terminal-toolbar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 10px 16px;
+      background: var(--sidebar-bg);
+      border-bottom: 1px solid var(--card-border);
+      font-size: 12.5px;
+    }
+
+    .log-filters {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .filter-btn {
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--card-border);
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .filter-btn:hover {
+      color: var(--text-bright);
+      border-color: #475569;
+    }
+
+    .filter-btn.active {
+      background: #1e293b;
+      color: var(--text-bright);
+      border-color: #475569;
+    }
+
+    .log-controls-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .auto-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12.5px;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+
+    .auto-toggle input {
+      width: 15px;
+      height: 15px;
+      cursor: pointer;
+      accent-color: var(--success);
+    }
+
+    .terminal-screen {
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 14px 18px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.65;
+      user-select: text;
+    }
+
+    .log-line {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 1px 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .log-time { color: #64748b; flex-shrink: 0; }
+    .log-svc { color: #38bdf8; flex-shrink: 0; }
+    .log-lvl-INFO { color: #34d399; font-weight: 500; flex-shrink: 0; }
+    .log-lvl-WARN { color: #fbbf24; font-weight: 600; flex-shrink: 0; }
+    .log-lvl-ERROR { color: #f87171; font-weight: 600; flex-shrink: 0; }
+    .log-msg { color: #cbd5e1; }
+
+    /* Help Tooltip Trigger & Floating Popover */
+    .help-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 1px solid rgba(148, 163, 184, 0.45);
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 600;
+      font-style: normal;
+      cursor: help;
+      transition: all 0.15s;
+      vertical-align: middle;
+      flex-shrink: 0;
+    }
+
+    .help-icon:hover,
+    .help-icon:focus {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(56, 189, 248, 0.12);
+    }
+
+    .term-popover {
+      position: fixed;
+      z-index: 2000;
+      width: 310px;
+      max-width: calc(100vw - 24px);
+      background: #172033;
+      border: 1px solid rgba(56, 189, 248, 0.45);
+      border-radius: 10px;
+      padding: 12px 14px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
+      display: none;
+      pointer-events: auto;
+    }
+
+    .term-popover-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 5px;
+    }
+
+    .term-popover-body {
+      font-size: 12.5px;
+      font-weight: 400;
+      line-height: 1.5;
+      color: var(--text);
+    }
+
+    /* Buttons */
+    .btn-primary {
+      padding: 9px 18px;
+      background: #0284c7;
+      color: #fff;
+      font-family: inherit;
+      font-weight: 500;
+      font-size: 13px;
+      border-radius: 8px;
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      cursor: pointer;
+      transition: background 0.18s;
+      white-space: nowrap;
+    }
+
+    .btn-primary:hover {
+      background: #0ea5e9;
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      padding: 8px 14px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+      font-family: inherit;
+      font-weight: 500;
+      font-size: 12.5px;
+      border-radius: 7px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.11);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-secondary.active-dns {
+      background: rgba(56, 189, 248, 0.14);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .dns-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .dns-option {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 14px;
+      border-radius: 9px;
+      border: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.02);
+      cursor: pointer;
+      transition: all 0.16s ease;
+    }
+
+    .dns-option:hover {
+      border-color: rgba(56, 189, 248, 0.45);
+      background: rgba(56, 189, 248, 0.04);
+    }
+
+    .dns-option.active-dns {
+      border-color: var(--accent);
+      background: rgba(56, 189, 248, 0.09);
+    }
+
+    .dns-opt-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .dns-opt-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 2px;
+    }
+
+    .dns-opt-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.45;
+    }
+
+    .active-strat-banner {
+      display: none;
+    }
+
+    .strat-spoiler-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    details.strat-spoiler {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    details.strat-spoiler > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 15px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-bright);
+      background: rgba(255, 255, 255, 0.02);
+      transition: background 0.15s;
+    }
+
+    details.strat-spoiler > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details.strat-spoiler > summary:hover {
+      background: rgba(56, 189, 248, 0.06);
+    }
+
+    details.strat-spoiler[open] > summary {
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .spoiler-arrow {
+      font-size: 13px;
+      color: var(--text-muted);
+      transition: transform 0.2s ease;
+    }
+
+    details.strat-spoiler[open] .spoiler-arrow {
+      transform: rotate(180deg);
+    }
+
+    .strat-spoiler-body {
+      padding: 14px;
+    }
+
+    .card-strat-summary {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+    }
+
+    .card-tags-inline {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 5px;
+    }
+
+    .btn-danger-outline {
+      padding: 6px 12px;
+      background: transparent;
+      color: #f87171;
+      font-family: inherit;
+      font-weight: 500;
+      font-size: 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      cursor: pointer;
+    }
+
+    .btn-danger-outline:hover {
+      background: rgba(239, 68, 68, 0.12);
+    }
+
+    /* Modal Disclaimer */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(6, 10, 18, 0.84);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal-box {
+      width: 500px;
+      max-width: calc(100vw - 32px);
+      background: var(--card-bg);
+      border: 1px solid #334155;
+      border-radius: 14px;
+      padding: 24px 26px;
+      box-shadow: 0 20px 44px rgba(0, 0, 0, 0.7);
+    }
+
+    .modal-title {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--text-bright);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .modal-desc {
+      font-size: 13.5px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 20px;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 22px;
+      background: #0f172a;
+      border: 1px solid var(--success);
+      color: var(--text-bright);
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+      animation: fadeIn 0.22s ease;
+      z-index: 3000;
+    }
+
+    .toast.error {
+      border-color: var(--danger);
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Left Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-info">
+        <h1>NetFixLinux</h1>
+        <p>(fork of NetFix Mobile by rupleide)</p>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">⌂ Главная</button>
+      <button class="nav-btn" data-tab="strategies" onclick="switchTab('strategies')">☷ Стратегии</button>
+      <button class="nav-btn" data-tab="logs" onclick="switchTab('logs')">▤ Логи (Nekoray)</button>
+      <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')">⚙ Настройки</button>
+    </nav>
+
+    <div class="hero-container">
+      <div class="hero-btn-wrap">
+        <div class="pulse-ring" id="hero-pulse"></div>
+        <button class="hero-btn" id="hero-btn" onclick="handleHeroClick()">
+          <div class="hero-btn-icon" id="hero-icon">⚡</div>
+          <div class="hero-btn-text" id="hero-text">ВКЛЮЧИТЬ</div>
+        </button>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="status-pill">
+        <div class="status-pill-left">
+          <span class="status-dot" id="pill-dpi-dot"></span>
+          <span>DPI</span>
+        </div>
+        <span class="status-pill-val" id="pill-dpi-text">Остановлен</span>
+      </div>
+      <div class="status-pill">
+        <div class="status-pill-left">
+          <span class="status-dot" id="pill-tg-dot"></span>
+          <span>TG Proxy</span>
+        </div>
+        <span class="status-pill-val" id="pill-tg-text">Ожидание</span>
+      </div>
+      <div class="status-pill" style="cursor: pointer;" onclick="switchTab('settings')" title="Нажмите, чтобы перейти к настройке Polkit">
+        <div class="status-pill-left">
+          <span class="status-dot" id="pill-polkit-dot"></span>
+          <span>Polkit</span>
+        </div>
+        <span class="status-pill-val" id="pill-polkit-text">Проверка...</span>
+      </div>
+      <div style="margin-top: 4px; font-size: 11px; color: var(--text-dim); padding-left: 2px;">
+        NetFixLinux Desktop v0.1.0
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main View -->
+  <main class="main-view">
+    <header class="topbar">
+      <div class="topbar-title">
+        <span>Сеть:</span>
+        <span class="topbar-network-val" id="topbar-network">определение...</span>
+      </div>
+      <div class="topbar-latencies">
+        <div class="ping-badge" id="ping-yt">
+          <span>YouTube:</span>
+          <span class="ping-val" id="val-yt">--</span>
+        </div>
+        <div class="ping-badge" id="ping-discord">
+          <span>Discord:</span>
+          <span class="ping-val" id="val-discord">--</span>
+        </div>
+        <div class="ping-badge" id="ping-cf">
+          <span>Cloudflare:</span>
+          <span class="ping-val" id="val-cf">--</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 1. Dashboard View -->
+    <section class="view-content" id="view-dashboard">
+      <div class="cards-grid">
+        <!-- DPI Card -->
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">
+              <span>⚡ Обход DPI</span>
+              <span class="help-icon" data-term="dpi">?</span>
+            </div>
+            <div class="card-head-controls">
+              <span class="card-badge" id="card-dpi-badge">Неактивен</span>
+              <label class="switch" title="Включить или отключить только обход DPI">
+                <input type="checkbox" id="switch-dpi" onchange="handleDpiSwitch(this.checked)">
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+          </div>
+          <div class="kv-list">
+            <div class="kv-row">
+              <span class="kv-label">Движок <span class="help-icon" data-term="nfqws">?</span></span>
+              <span class="kv-val" id="card-dpi-engine">Nfqws</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Стратегия</span>
+              <div class="card-strat-summary">
+                <span class="kv-val" id="card-dpi-strat">загрузка...</span>
+                <div class="card-tags-inline" id="card-dpi-tags"></div>
+              </div>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Статус ядра</span>
+              <span class="kv-val" id="card-dpi-status">Остановлен</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- TG Proxy Card -->
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">
+              <span>✈ Telegram Proxy</span>
+              <span class="help-icon" data-term="mtproto">?</span>
+            </div>
+            <div class="card-head-controls">
+              <span class="card-badge" id="card-tg-badge">Остановлен</span>
+              <label class="switch" title="Включить или отключить только Telegram Proxy">
+                <input type="checkbox" id="switch-tg" onchange="handleTgSwitch(this.checked)">
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+          </div>
+          <div class="kv-list">
+            <div class="kv-row">
+              <span class="kv-label">Локальный адрес МТ-proxy</span>
+              <span class="kv-val mono" id="card-tg-addr">127.0.0.1:1443</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Cloudflare Fronting <span class="help-icon" data-term="cf_fronting">?</span></span>
+              <span class="kv-val" id="card-tg-cf">Включен</span>
+            </div>
+            <div class="kv-row" style="align-items: center;">
+              <span class="kv-label">Подключение</span>
+              <button class="btn-primary" style="padding: 5px 12px; font-size: 12px; min-width: 154px;" onclick="openTelegramLink()">Открыть в Telegram</button>
+            </div>
+            <div class="kv-row" style="align-items: center;">
+              <span class="kv-label">Ссылка конфигурации</span>
+              <button class="btn-secondary" style="padding: 5px 12px; font-size: 12px; min-width: 154px;" onclick="copyTelegramLink()">Скопировать ссылку</button>
+            </div>
+            <div class="kv-row" style="align-items: center;">
+              <span class="kv-label">Мобильный клиент</span>
+              <button class="btn-secondary" style="padding: 5px 12px; font-size: 12px; min-width: 154px;" onclick="openQrModal()">Показать QR код</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Traffic Mode -->
+      <div class="mode-section">
+        <div class="mode-title">
+          <span>Режим маршрутизации трафика</span>
+        </div>
+        <div class="mode-radios">
+          <div class="mode-card active" id="mode-direct" onclick="selectMode('direct')">
+            <div class="mode-card-header">
+              <span>⚡ Direct DPI</span>
+              <span class="help-icon" data-term="direct_dpi" onclick="event.stopPropagation()">?</span>
+            </div>
+            <div class="mode-card-desc">Перехват ядром NFQUEUE. Работает напрямую для всех программ без настройки прокси.</div>
+          </div>
+
+          <div class="mode-card" id="mode-system_proxy" onclick="selectMode('system_proxy')">
+            <div class="mode-card-header">
+              <span>🌐 System Proxy</span>
+              <span class="help-icon" data-term="system_proxy" onclick="event.stopPropagation()">?</span>
+            </div>
+            <div class="mode-card-desc">Без прав root. Автонастройка SOCKS5-прокси в GNOME (gsettings) и KDE (kwriteconfig).</div>
+          </div>
+
+          <div class="mode-card" id="mode-tun" onclick="selectMode('tun')">
+            <div class="mode-card-header">
+              <span>🛡 TUN Tunnel</span>
+              <span class="help-icon" data-term="tun" onclick="event.stopPropagation()">?</span>
+            </div>
+            <div class="mode-card-desc">Виртуальный сетевой интерфейс через Polkit для игр и приложений, игнорирующих прокси.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Strategies View -->
+    <section class="view-content" id="view-strategies" style="display:none;">
+      <div class="strat-header">
+        <div>
+          <h2>Предустановленные стратегии DPI</h2>
+          <p>Выберите профиль обхода вручную или запустите автоматический подбор для вашего провайдера</p>
+        </div>
+        <button class="btn-primary" id="btn-autoscan" onclick="runAutoScan()">⚡ Автоподбор стратегии</button>
+      </div>
+
+      <!-- Auto-scan live progress -->
+      <div class="scan-panel" id="scan-panel">
+        <div class="scan-panel-head">
+          <span class="scan-panel-title" id="scan-title">Идёт автоподбор оптимальной стратегии...</span>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn-danger-outline" id="btn-cancel-scan" onclick="cancelAutoScan()">Остановить</button>
+            <button class="btn-secondary" id="btn-close-scan" style="display: none; padding: 5px 12px; font-size: 12px;" onclick="closeScanPanel()">Закрыть</button>
+          </div>
+        </div>
+        <div style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 4px;" id="scan-hint">
+          На время перебора модуль DPI временно останавливается для тестирования кандидатов; Telegram Proxy продолжает работать. По завершении DPI включится автоматически.
+        </div>
+        <div class="scan-bar-bg">
+          <div class="scan-bar-fill" id="scan-bar-fill"></div>
+        </div>
+        <div class="scan-meta">
+          <span id="scan-current-strat">Подготовка...</span>
+          <span id="scan-progress-count">0%</span>
+        </div>
+      </div>
+
+      <div class="strat-spoiler-label">Для опытных пользователей</div>
+      <details class="strat-spoiler" id="strat-spoiler">
+        <summary>
+          <span>Выбранная стратегия: <span id="spoiler-strat-name" style="color: var(--accent);">определение...</span></span>
+          <span class="spoiler-arrow">▾</span>
+        </summary>
+        <div class="strat-spoiler-body">
+          <div class="strat-grid" id="strat-list"></div>
+        </div>
+      </details>
+    </section>
+
+    <!-- 3. Live Logs View -->
+    <section id="view-logs">
+      <div class="terminal-container">
+        <div class="terminal-toolbar">
+          <div class="log-filters">
+            <button class="filter-btn active" onclick="setLogFilter('ALL')">Все</button>
+            <button class="filter-btn" onclick="setLogFilter('INFO')">INFO</button>
+            <button class="filter-btn" onclick="setLogFilter('WARN')">WARN</button>
+            <button class="filter-btn" onclick="setLogFilter('ERROR')">ERROR</button>
+          </div>
+          <div class="log-controls-right">
+            <label class="auto-toggle">
+              <input type="checkbox" id="logs-autorefresh" checked onchange="toggleLogsAutoRefresh(this.checked)">
+              <span>Автообновление (2 сек)</span>
+            </label>
+            <button class="btn-secondary" style="padding: 5px 11px; font-size: 12px;" onclick="refreshLogs(true)">Обновить</button>
+            <button class="btn-secondary" style="padding: 5px 11px; font-size: 12px;" onclick="clearLogsScreen()">Очистить</button>
+          </div>
+        </div>
+        <div class="terminal-screen" id="terminal-screen"></div>
+      </div>
+    </section>
+
+    <!-- 5. Settings View -->
+    <section class="view-content" id="view-settings" style="display:none;">
+      <div style="max-width: 660px; display: flex; flex-direction: column; gap: 16px;">
+        <!-- DNS Card -->
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">
+              <span>Безопасный DNS (DoT)</span>
+            </div>
+          </div>
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.5;">
+            Шифрует DNS-запросы через <span style="color: var(--text);">systemd-resolved</span> для защиты от подмены и блокировки доменов провайдером.
+          </p>
+          <div class="dns-grid">
+            <div class="dns-option" id="dns-system" onclick="selectDns('system')">
+              <div class="dns-opt-info">
+                <div class="dns-opt-title">Системный (по умолчанию)</div>
+                <div class="dns-opt-desc">Использует DNS-серверы роутера или провайдера (из NetworkManager / DHCP) без шифрования DoT. Максимальная локальная скорость, но провайдер может перехватывать DNS-запросы.</div>
+              </div>
+              <span class="card-badge" id="dns-badge-system">Выбрать</span>
+            </div>
+
+            <div class="dns-option" id="dns-cloudflare" onclick="selectDns('cloudflare')">
+              <div class="dns-opt-info">
+                <div class="dns-opt-title">Cloudflare (1.1.1.1) — DoT</div>
+                <div class="dns-opt-desc">Один из самых быстрых DNS с шифрованием DoT (1.1.1.1 / 1.0.0.1). Не фильтрует контент и надёжно обходит DNS-блокировки провайдера.</div>
+              </div>
+              <span class="card-badge" id="dns-badge-cloudflare">Выбрать</span>
+            </div>
+
+            <div class="dns-option" id="dns-google" onclick="selectDns('google')">
+              <div class="dns-opt-info">
+                <div class="dns-opt-title">Google (8.8.8.8) — DoT</div>
+                <div class="dns-opt-desc">Глобальный DNS с шифрованием DoT (8.8.8.8 / 8.8.4.4). Стабильно резолвит зарубежные CDN (YouTube, Discord) без цензуры и фильтрации.</div>
+              </div>
+              <span class="card-badge" id="dns-badge-google">Выбрать</span>
+            </div>
+
+            <div class="dns-option" id="dns-quad9" onclick="selectDns('quad9')">
+              <div class="dns-opt-info">
+                <div class="dns-opt-title">Quad9 (9.9.9.9) — DoT</div>
+                <div class="dns-opt-desc">Защищённый швейцарский DNS с DoT (9.9.9.9). Без цензуры, но дополнительно блокирует известные фишинговые и вредоносные домены.</div>
+              </div>
+              <span class="card-badge" id="dns-badge-quad9">Выбрать</span>
+            </div>
+
+            <div class="dns-option" id="dns-adguard" onclick="selectDns('adguard')">
+              <div class="dns-opt-info">
+                <div class="dns-opt-title">AdGuard DNS — DoT</div>
+                <div class="dns-opt-desc">Шифрованный DNS (dns.adguard-dns.com) со встроенной блокировкой рекламы, счётчиков аналитики и телеметрии на уровне доменов.</div>
+              </div>
+              <span class="card-badge" id="dns-badge-adguard">Выбрать</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Polkit Card -->
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">
+              <span>Политика Polkit (без повторного пароля)</span>
+            </div>
+            <span class="card-badge" id="polkit-badge">Не установлено</span>
+          </div>
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.5;">
+            Разрешает активному пользователю запускать службы <span style="color: var(--text);">netfixctl</span> и режим TUN без ввода пароля root при каждом переключении.
+          </p>
+          <button class="btn-secondary" onclick="installPolkitAction()">Установить правило Polkit</button>
+        </div>
+
+        <!-- Autostart Card -->
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title"><span>Автозапуск при входе в систему</span></div>
+            <input type="checkbox" id="autostart-chk" onchange="handleAutostartChange(this.checked)" style="width: 17px; height: 17px; cursor: pointer; accent-color: var(--accent);">
+          </div>
+          <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
+            Создаёт файл запуска в <span style="font-family: monospace; color: var(--text);">~/.config/autostart/</span> для старта NetFixLinux в системном трее.
+          </p>
+        </div>
+
+        <!-- About Card -->
+        <div class="card" style="border-color: rgba(56, 189, 248, 0.22);">
+          <div class="card-title" style="margin-bottom: 8px;">О программе NetFixLinux</div>
+          <p style="font-size: 13px; color: var(--text-muted); line-height: 1.6;">
+            Настольный клиент для Linux на базе архитектуры <span style="color: var(--text);">NetFix Mobile</span> (автор: <em style="color: var(--text);">rupleide</em>).<br>
+            Лицензия: свободный открытый форк с независимым именем.<br>
+            Репозиторий: <a href="#" onclick="openExternal('https://github.com/FlyingBober/NetFixMobile'); return false;" style="color: var(--accent); text-decoration: none;">github.com/FlyingBober/NetFixMobile</a>
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- First-Run Disclaimer Modal -->
+  <div class="modal-overlay" id="disclaimer-modal" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-title">
+        <span>⚡ Добро пожаловать в NetFixLinux</span>
+      </div>
+      <div class="modal-desc">
+        Данная программа является независимым клиентом для Linux, разработанным на базе архитектуры проекта <span style="color: var(--text-bright);">NetFix Mobile</span> (автор: <em>rupleide</em>).<br><br>
+        Проект распространяется свободно, не использует товарные знаки оригинала и предоставляет удобный нативный интерфейс управления обходом DPI и Telegram Proxy для настольного Linux.
+      </div>
+      <div style="display: flex; justify-content: flex-end;">
+        <button class="btn-primary" onclick="acceptDisclaimerModal()">Я понимаю / Начать работу</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Telegram Proxy QR Modal -->
+  <div class="modal-overlay" id="qr-modal" style="display:none;" onclick="if(event.target === this) closeQrModal()">
+    <div class="modal-box" style="width: 440px;">
+      <div class="card-head" style="margin-bottom: 14px;">
+        <div class="modal-title" style="margin-bottom: 0;">✈ Подключение Telegram Proxy</div>
+        <button class="btn-secondary" style="padding: 4px 10px;" onclick="closeQrModal()">✕</button>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 16px;">
+        <div id="qr-modal-svg" style="background: #fff; padding: 12px; border-radius: 10px; width: 200px; height: 200px; display: flex; align-items: center; justify-content: center;"></div>
+        <div class="kv-list" style="width: 100%;">
+          <div class="kv-row">
+            <span class="kv-label">Сервер</span>
+            <span class="kv-val mono" id="qr-modal-server">127.0.0.1</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-label">Порт</span>
+            <span class="kv-val mono" id="qr-modal-port">1443</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-label">Секретный ключ</span>
+            <span class="kv-val mono" id="qr-modal-secret" style="user-select: text;">dd...</span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px; width: 100%; justify-content: flex-end;">
+          <button class="btn-secondary" onclick="copyTelegramLink()">Скопировать ссылку</button>
+          <button class="btn-primary" onclick="openTelegramLink()">Открыть в Telegram</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Term Explanation Popover -->
+  <div class="term-popover" id="term-popover">
+    <div class="term-popover-title" id="term-popover-title"></div>
+    <div class="term-popover-body" id="term-popover-body"></div>
+  </div>
+
+  <div id="toast-el" class="toast" style="display:none;"></div>
+
+  <script>
+    const TERM_DOCS = {
+      dpi: {
+        title: 'DPI (Deep Packet Inspection)',
+        body: 'Технология глубокого анализа трафика на стороне провайдера (ТСПУ). Оборудование проверяет незашифрованное имя сайта (SNI) в первом пакете соединения и разрывает доступ к заблокированным ресурсам.'
+      },
+      nfqws: {
+        title: 'nfqws / ByeDPI (NFQUEUE 200)',
+        body: 'Движок модификации сетевых пакетов из пакета zapret. Перехватывает исходящие пакеты через очередь ядра Linux NFQUEUE (№200) и дробит или маскирует заголовок TLS так, чтобы ТСПУ не смог прочитать имя домена.'
+      },
+      direct_dpi: {
+        title: 'Режим Direct DPI',
+        body: 'Системный перехват на уровне ядра Linux (nftables/iptables -> NFQUEUE). Не требует проксирования и замедления скорости: трафик программ идёт напрямую, модифицируются только первые пакеты соединений из списка хостов.'
+      },
+      system_proxy: {
+        title: 'Режим System Proxy',
+        body: 'Бесправный режим без root: прописывает локальный SOCKS5-прокси в настройки рабочего стола GNOME (gsettings) или KDE Plasma (kwriteconfig + kded). Удобно для браузеров, но игры и Flatpak могут его игнорировать.'
+      },
+      tun: {
+        title: 'Режим TUN Tunnel',
+        body: 'Создаёт виртуальную сетевую карту (tun0) и заворачивает туда весь трафик системы. Работает даже с программами без поддержки прокси, требует правило Polkit для старта без пароля.'
+      },
+      mtproto: {
+        title: 'Telegram Proxy (MTProto-over-WebSocket)',
+        body: 'Локальный прокси-сервер для Telegram на 127.0.0.1:1443. Оборачивает трафик Telegram в обычное HTTPS WebSocket-соединение через пул адресов Cloudflare, делая его невидимым для блокировок.'
+      },
+      cf_fronting: {
+        title: 'Cloudflare Fronting / Pool',
+        body: 'Техника маршрутизации соединений через пограничные узлы сети Cloudflare (CF), что позволяет обходить прямую блокировку серверов Telegram по IP-адресам.'
+      },
+      dot: {
+        title: 'DoT (DNS-over-TLS)',
+        body: 'Шифрование DNS-запросов через TLS на уровне системной службы systemd-resolved. Не даёт провайдеру подменить IP-адрес сайта (DNS-спуфинг) или заблокировать резолв домена.'
+      },
+      polkit: {
+        title: 'Polkit (PolicyKit)',
+        body: 'Системный механизм разграничения прав в Linux. Установка .policy файла разрешает активному пользователю управлять службами netfixctl через pkexec без постоянного ввода пароля администратора.'
+      },
+      fake: {
+        title: 'Метод fake',
+        body: 'Отправка поддельного (фейкового) пакета с повреждённой контрольной суммой или малым TTL перед настоящим запросом: анализатор ТСПУ сбивается с толку, а целевой сервер отбрасывает фейк и принимает настоящий пакет.'
+      },
+      multisplit: {
+        title: 'Метод multisplit / split2',
+        body: 'Разрезает TLS ClientHello на несколько маленьких TCP-сегментов на границе поля SNI (midsld), не позволяя DPI собрать доменное имя в одном пакете.'
+      },
+      disorder2: {
+        title: 'Метод disorder2',
+        body: 'Отправляет нарезанные сегменты TLS ClientHello в обратном порядке. Сервер собирает их корректно, а многие простейшие DPI не способны пересобрать поток.'
+      },
+      fakedsplit: {
+        title: 'Метод fakedsplit',
+        body: 'Комбинация разрезания пакета и вставки поддельных фрагментов между частями настоящего ClientHello — часто помогает для Discord и устойчивых ТСПУ.'
+      },
+      badseq: {
+        title: 'Обман ТСПУ: badseq / md5sig / ts',
+        body: 'Способы заставить конечный сервер отбросить фейковый пакет, чтобы он прошёл только до ТСПУ: неверный номер последовательности TCP (badseq), неверная подпись MD5 (md5sig) или неверная метка времени (ts).'
+      },
+      quic: {
+        title: 'QUIC (HTTP/3, UDP 443)',
+        body: 'Современный быстрый протокол поверх UDP. Часто блокируется для YouTube и голосового трафика Discord; стратегия шлёт fake UDP-пакеты для обхода фильтрации.'
+      },
+      autottl: {
+        title: 'AutoTTL',
+        body: 'Автоматический расчёт времени жизни пакета (TTL), чтобы фейковый пакет дошёл до оборудования фильтрации провайдера, но гарантированно «умер» до достижения конечного сайта.'
+      }
+    };
+
+    const invoke = (cmd, args = {}) => {
+      if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
+        return window.__TAURI_INTERNALS__.invoke(cmd, args);
+      }
+      return mockInvoke(cmd, args);
+    };
+
+    let appState = {
+      connected: false,
+      masterConnected: false,
+      masterInitialized: false,
+      polkit_ready: false,
+      traffic_mode: 'direct',
+      dns_mode: 'system',
+      active_strategy: '',
+      strategies: [],
+      network: 'default',
+      local_ip: 'определение...',
+      tg_link: '',
+      tg_qr_svg: '',
+      logs: [],
+      currentLogFilter: 'ALL',
+      activeTab: 'dashboard',
+      logsAutoRefresh: true,
+      scanPollingId: null,
+      scanAutoCloseTimer: null
+    };
+
+    let toastTimer = null;
+    function showToast(msg, isError = false) {
+      const el = document.getElementById('toast-el');
+      el.textContent = msg;
+      el.className = isError ? 'toast error' : 'toast';
+      el.style.display = 'block';
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { el.style.display = 'none'; }, 3000);
+    }
+
+    function switchTab(tabId) {
+      appState.activeTab = tabId;
+      document.querySelectorAll('.nav-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.tab === tabId);
+      });
+      document.querySelectorAll('.view-content, #view-logs').forEach(v => {
+        v.style.display = 'none';
+      });
+
+      const tabEl = document.getElementById('view-' + tabId);
+      if (tabEl) {
+        tabEl.style.display = tabId === 'logs' ? 'flex' : 'block';
+      }
+
+      if (tabId === 'logs') refreshLogs(true);
+      if (tabId === 'strategies') refreshStatus().then(loadStrategies);
+    }
+
+    async function loadInitialState() {
+      try {
+        const guiState = await invoke('get_gui_state');
+        if (!guiState.disclaimer_accepted) {
+          document.getElementById('disclaimer-modal').style.display = 'flex';
+        }
+        appState.traffic_mode = guiState.traffic_mode || 'direct';
+        appState.dns_mode = guiState.dns_mode || 'system';
+        selectMode(appState.traffic_mode, false);
+        highlightDnsButton(appState.dns_mode);
+
+        document.getElementById('autostart-chk').checked = !!guiState.autostart;
+
+        const [strategies, status, polkitReady] = await Promise.all([
+          invoke('get_strategies'),
+          invoke('get_status'),
+          invoke('is_polkit_ready')
+        ]);
+        appState.strategies = strategies || [];
+        if (!appState.masterInitialized) {
+          appState.masterConnected = !!(status.dpi_active && status.tg_active);
+          appState.masterInitialized = true;
+        }
+        updateStatusUI(status);
+        updatePolkitBadge(polkitReady);
+        loadTgInfo();
+
+        loadLatencies();
+        let isResizing = false;
+        let resizeTimer = null;
+        window.addEventListener('resize', () => {
+          isResizing = true;
+          if (resizeTimer) clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(() => { isResizing = false; }, 500);
+        });
+
+        setInterval(() => { if (!isResizing) loadLatencies(); }, 8000);
+        setInterval(() => { if (!isResizing) refreshStatus(); }, 3000);
+        setInterval(() => {
+          if (!isResizing && appState.activeTab === 'logs' && appState.logsAutoRefresh) {
+            refreshLogs(false);
+          }
+        }, 2000);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function refreshStatus() {
+      try {
+        const status = await invoke('get_status');
+        updateStatusUI(status);
+      } catch (e) {}
+    }
+
+    function resolveStrategyMeta(rawCmd) {
+      const normActive = normalizeCmd(rawCmd);
+      if (!normActive) {
+        return { name: 'не задана', tags: [] };
+      }
+      const match = (appState.strategies || []).find(item => {
+        const normCmd = normalizeCmd(item.command);
+        return normActive === normCmd || normActive.includes(normCmd) || normCmd.includes(normActive);
+      });
+      if (match) {
+        return { name: match.name, tags: match.tags || [] };
+      }
+      const tags = [];
+      if (normActive.includes('tcp')) tags.push('TCP');
+      if (normActive.includes('udp')) tags.push('UDP / QUIC');
+      if (normActive.includes('disorder2')) tags.push('disorder2');
+      if (normActive.includes('fakedsplit')) tags.push('fakedsplit');
+      if (normActive.includes('fake')) tags.push('fake');
+      return { name: 'Пользовательская', tags };
+    }
+
+    function updateStatusUI(status) {
+      appState.connected = !!status.dpi_active;
+      appState.active_strategy = status.active_strategy || '';
+      appState.network = status.network_profile || 'default';
+      appState.local_ip = status.local_ip || status.network_profile || 'не определён';
+      if (typeof status.polkit_ready === 'boolean') {
+        updatePolkitBadge(status.polkit_ready);
+      }
+      if (status.dns_mode) {
+        highlightDnsButton(status.dns_mode.toLowerCase());
+      }
+
+      document.getElementById('topbar-network').textContent = appState.local_ip;
+      document.getElementById('card-dpi-engine').textContent = status.dpi_engine || 'nfqws';
+
+      const stratMeta = resolveStrategyMeta(appState.active_strategy);
+      document.getElementById('card-dpi-strat').textContent = stratMeta.name;
+      const cardTagsEl = document.getElementById('card-dpi-tags');
+      if (cardTagsEl) {
+        cardTagsEl.innerHTML = stratMeta.tags
+          .map(t => `<span class="tag">${escapeHtml(t)}</span>`)
+          .join('');
+      }
+      const spoilerNameEl = document.getElementById('spoiler-strat-name');
+      if (spoilerNameEl) {
+        spoilerNameEl.textContent = stratMeta.name;
+      }
+
+      const heroBtn = document.getElementById('hero-btn');
+      const heroPulse = document.getElementById('hero-pulse');
+      const heroIcon = document.getElementById('hero-icon');
+      const heroText = document.getElementById('hero-text');
+      const pillDpiDot = document.getElementById('pill-dpi-dot');
+      const pillDpiText = document.getElementById('pill-dpi-text');
+      const pillTgDot = document.getElementById('pill-tg-dot');
+      const pillTgText = document.getElementById('pill-tg-text');
+      const cardDpiBadge = document.getElementById('card-dpi-badge');
+      const cardDpiStatus = document.getElementById('card-dpi-status');
+      const cardTgBadge = document.getElementById('card-tg-badge');
+      const switchDpi = document.getElementById('switch-dpi');
+      const switchTg = document.getElementById('switch-tg');
+
+      // Master button state depends only on appState.masterConnected & polkit_ready,
+      // NOT on independent card toggle switches.
+      heroBtn.classList.remove('connected', 'needs-polkit');
+      heroPulse.classList.remove('active');
+
+      if (!appState.polkit_ready && !appState.masterConnected) {
+        heroBtn.classList.add('needs-polkit');
+        heroIcon.textContent = '🔒';
+        heroText.textContent = 'НАСТРОИТЬ';
+      } else if (appState.masterConnected) {
+        heroBtn.classList.add('connected');
+        heroPulse.classList.add('active');
+        heroIcon.textContent = '⚡';
+        heroText.textContent = 'ОТКЛЮЧИТЬ';
+      } else {
+        heroIcon.textContent = '⚡';
+        heroText.textContent = 'ВКЛЮЧИТЬ';
+      }
+
+      if (switchDpi && !switchDpi.disabled) {
+        switchDpi.checked = !!status.dpi_active;
+      }
+      if (status.dpi_active) {
+        pillDpiDot.classList.add('active');
+        pillDpiText.textContent = 'Активен';
+        cardDpiBadge.classList.add('active');
+        cardDpiBadge.textContent = 'Активен';
+        cardDpiStatus.textContent = 'Работает';
+      } else {
+        pillDpiDot.classList.remove('active');
+        pillDpiText.textContent = 'Остановлен';
+        cardDpiBadge.classList.remove('active');
+        cardDpiBadge.textContent = 'Неактивен';
+        cardDpiStatus.textContent = 'Остановлен';
+      }
+
+      const tgPort = status.tg_port || 1443;
+      document.getElementById('card-tg-addr').textContent = '127.0.0.1:' + tgPort;
+      document.getElementById('card-tg-cf').textContent = status.tg_cf_enabled !== false ? 'Включен' : 'Выключен';
+
+      if (switchTg && !switchTg.disabled) {
+        switchTg.checked = !!status.tg_active;
+      }
+      if (status.tg_active) {
+        pillTgDot.classList.add('active');
+        pillTgText.textContent = '127.0.0.1:' + tgPort;
+        cardTgBadge.classList.add('active');
+        cardTgBadge.textContent = 'Активен';
+      } else {
+        pillTgDot.classList.remove('active');
+        pillTgText.textContent = 'Остановлен';
+        cardTgBadge.classList.remove('active');
+        cardTgBadge.textContent = 'Остановлен';
+      }
+    }
+
+    async function handleHeroClick() {
+      const targetState = !appState.masterConnected;
+      const heroBtn = document.getElementById('hero-btn');
+      heroBtn.disabled = true;
+      try {
+        const res = await invoke('toggle_connect', { connect: targetState });
+        appState.masterConnected = targetState;
+        updateStatusUI(res);
+        showToast(targetState ? 'DPI и Telegram Proxy включены' : 'DPI и Telegram Proxy отключены');
+      } catch (err) {
+        showToast('Ошибка: ' + err, true);
+      } finally {
+        heroBtn.disabled = false;
+      }
+    }
+
+    async function handleDpiSwitch(enable) {
+      const sw = document.getElementById('switch-dpi');
+      if (sw) sw.disabled = true;
+      try {
+        const res = await invoke('toggle_dpi_service', { enable });
+        if (sw) sw.disabled = false;
+        updateStatusUI(res);
+        showToast(enable ? 'Обход DPI включён' : 'Обход DPI отключён');
+      } catch (err) {
+        if (sw) {
+          sw.disabled = false;
+          sw.checked = !enable;
+        }
+        showToast('Ошибка DPI: ' + err, true);
+      }
+    }
+
+    async function handleTgSwitch(enable) {
+      const sw = document.getElementById('switch-tg');
+      if (sw) sw.disabled = true;
+      try {
+        const res = await invoke('toggle_tg_service', { enable });
+        if (sw) sw.disabled = false;
+        updateStatusUI(res);
+        showToast(enable ? 'Telegram Proxy включён' : 'Telegram Proxy отключён');
+      } catch (err) {
+        if (sw) {
+          sw.disabled = false;
+          sw.checked = !enable;
+        }
+        showToast('Ошибка TG Proxy: ' + err, true);
+      }
+    }
+
+    async function selectMode(mode, save = true) {
+      document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('active'));
+      const activeEl = document.getElementById('mode-' + mode);
+      if (activeEl) activeEl.classList.add('active');
+      appState.traffic_mode = mode;
+
+      if (save) {
+        try {
+          await invoke('set_traffic_mode', { mode });
+          const labels = {
+            direct: 'Direct DPI (NFQUEUE)',
+            system_proxy: 'System Proxy (SOCKS5)',
+            tun: 'TUN Tunnel'
+          };
+          showToast('Режим переключён: ' + (labels[mode] || mode));
+        } catch (e) {
+          showToast('Ошибка переключения режима: ' + e, true);
+        }
+      }
+    }
+
+    async function loadLatencies() {
+      try {
+        const lat = await invoke('get_latencies');
+        updateBadge('val-yt', 'ping-yt', lat.youtube_ms);
+        updateBadge('val-discord', 'ping-discord', lat.discord_ms);
+        updateBadge('val-cf', 'ping-cf', lat.cloudflare_ms);
+      } catch (e) {}
+    }
+
+    function updateBadge(valId, badgeId, ms) {
+      const v = document.getElementById(valId);
+      const b = document.getElementById(badgeId);
+      if (ms !== null && ms !== undefined) {
+        v.textContent = ms + ' ms';
+        b.className = 'ping-badge ' + (ms < 120 ? 'good' : ms < 300 ? 'med' : 'bad');
+      } else {
+        v.textContent = 'таймаут';
+        b.className = 'ping-badge bad';
+      }
+    }
+
+    function guessTermKey(tagText) {
+      const lower = tagText.toLowerCase();
+      if (lower.includes('quic')) return 'quic';
+      if (lower.includes('badseq') || lower.includes('md5sig')) return 'badseq';
+      if (lower.includes('fakedsplit')) return 'fakedsplit';
+      if (lower.includes('disorder')) return 'disorder2';
+      if (lower.includes('autottl')) return 'autottl';
+      return null;
+    }
+
+    function normalizeCmd(s) {
+      return String(s || '').replace(/\s+/g, ' ').trim();
+    }
+
+    async function loadStrategies() {
+      try {
+        const list = await invoke('get_strategies');
+        appState.strategies = list || [];
+        const container = document.getElementById('strat-list');
+        container.innerHTML = '';
+
+        const normActive = normalizeCmd(appState.active_strategy);
+        let matchedName = resolveStrategyMeta(appState.active_strategy).name;
+
+        list.forEach(item => {
+          const card = document.createElement('div');
+          const normCmd = normalizeCmd(item.command);
+          const isCurrent = normActive.length > 0 && (normActive === normCmd || normActive.includes(normCmd) || normCmd.includes(normActive));
+          if (isCurrent) {
+            matchedName = item.name;
+          }
+
+          card.className = 'strat-card ' + (isCurrent ? 'active' : '');
+
+          const tagsHtml = item.tags.map(t => {
+            const term = guessTermKey(t);
+            const help = term ? `<span class="help-icon" data-term="${term}">?</span>` : '';
+            return `<span class="tag">${escapeHtml(t)}${help}</span>`;
+          }).join('');
+
+          card.innerHTML = `
+            <div class="strat-info">
+              <h3>${escapeHtml(item.name)}</h3>
+              <p>${escapeHtml(item.description)}</p>
+              <div class="tags">${tagsHtml}</div>
+            </div>
+            <button class="${isCurrent ? 'btn-primary' : 'btn-secondary'}" data-cmd="${escapeAttr(item.command)}">
+              ${isCurrent ? '✓ Применена' : 'Применить'}
+            </button>
+          `;
+
+          card.querySelector('button').addEventListener('click', () => applyCustomStrategy(item.command));
+          container.appendChild(card);
+        });
+
+        const spoilerNameEl = document.getElementById('spoiler-strat-name');
+        if (spoilerNameEl) {
+          spoilerNameEl.textContent = normActive ? matchedName : 'не задана';
+        }
+      } catch (e) {}
+    }
+
+    async function applyCustomStrategy(cmd) {
+      showToast('Применяем стратегию и перезапускаем DPI...');
+      try {
+        await invoke('apply_strategy', { command: cmd });
+        showToast('Стратегия применена!');
+        await refreshStatus();
+        await loadStrategies();
+        loadLatencies();
+      } catch (e) {
+        showToast('Ошибка применения: ' + e, true);
+      }
+    }
+
+    function closeScanPanel() {
+      if (appState.scanAutoCloseTimer) {
+        clearTimeout(appState.scanAutoCloseTimer);
+        appState.scanAutoCloseTimer = null;
+      }
+      document.getElementById('scan-panel').style.display = 'none';
+    }
+
+    async function runAutoScan() {
+      const panel = document.getElementById('scan-panel');
+      const btn = document.getElementById('btn-autoscan');
+      const cancelBtn = document.getElementById('btn-cancel-scan');
+      const closeBtn = document.getElementById('btn-close-scan');
+      const fill = document.getElementById('scan-bar-fill');
+      const stratEl = document.getElementById('scan-current-strat');
+      const countEl = document.getElementById('scan-progress-count');
+      const titleEl = document.getElementById('scan-title');
+
+      if (appState.scanAutoCloseTimer) {
+        clearTimeout(appState.scanAutoCloseTimer);
+        appState.scanAutoCloseTimer = null;
+      }
+
+      panel.style.display = 'block';
+      panel.style.borderColor = 'rgba(56, 189, 248, 0.35)';
+      cancelBtn.style.display = 'inline-block';
+      closeBtn.style.display = 'none';
+      btn.disabled = true;
+      fill.style.width = '5%';
+      titleEl.textContent = 'Идёт автоподбор оптимальной стратегии...';
+      stratEl.textContent = 'Запрос прав доступа и подготовка...';
+      countEl.textContent = '5%';
+
+      if (appState.scanPollingId) clearInterval(appState.scanPollingId);
+      appState.scanPollingId = setInterval(async () => {
+        try {
+          const st = await invoke('get_scan_status');
+          fill.style.width = (st.percent || 5) + '%';
+          countEl.textContent = (st.percent || 0) + '%' + (st.total > 0 ? ` (${st.index}/${st.total})` : '');
+          if (st.strategy_name) {
+            const extra = st.passed ? ` — ${st.passed}` : '';
+            const phase = st.phase === 'final' ? '[Финал] ' : st.phase === 'quick' ? '[Быстрая проверка] ' : '';
+            stratEl.textContent = phase + st.strategy_name + extra;
+          }
+        } catch (e) {}
+      }, 400);
+
+      try {
+        await invoke('run_auto_scan');
+        clearInterval(appState.scanPollingId);
+        appState.scanPollingId = null;
+        fill.style.width = '100%';
+        countEl.textContent = '100%';
+        titleEl.textContent = 'Автоподбор завершён!';
+        stratEl.textContent = 'Победившая стратегия сохранена, служба DPI перезапущена.';
+        panel.style.borderColor = 'rgba(16, 185, 129, 0.45)';
+        cancelBtn.style.display = 'none';
+        closeBtn.style.display = 'inline-block';
+        showToast('Автоподбор завершён и применён!');
+        await refreshStatus();
+        await loadStrategies();
+        loadLatencies();
+        appState.scanAutoCloseTimer = setTimeout(() => {
+          panel.style.display = 'none';
+        }, 5000);
+      } catch (e) {
+        clearInterval(appState.scanPollingId);
+        appState.scanPollingId = null;
+        titleEl.textContent = 'Автоподбор прерван';
+        stratEl.textContent = String(e);
+        panel.style.borderColor = 'rgba(239, 68, 68, 0.45)';
+        cancelBtn.style.display = 'none';
+        closeBtn.style.display = 'inline-block';
+        showToast('Ошибка автоподбора: ' + e, true);
+        await refreshStatus();
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function cancelAutoScan() {
+      try {
+        await invoke('cancel_auto_scan');
+        showToast('Отправка сигнала остановки...');
+      } catch (e) {}
+    }
+
+    async function loadTgInfo() {
+      try {
+        const info = await invoke('get_tg_info');
+        appState.tg_link = info.link || '';
+        appState.tg_qr_svg = info.qr_svg || '';
+        const port = info.port || 1443;
+        document.getElementById('qr-modal-port').textContent = String(port);
+        if (appState.tg_qr_svg) {
+          document.getElementById('qr-modal-svg').innerHTML = appState.tg_qr_svg;
+        }
+
+        if (info.link) {
+          try {
+            const url = new URL(info.link);
+            const server = url.searchParams.get('server') || '127.0.0.1';
+            const secret = url.searchParams.get('secret') || '';
+            document.getElementById('qr-modal-server').textContent = server;
+            if (secret) {
+              document.getElementById('qr-modal-secret').textContent = secret;
+            }
+          } catch (e) {}
+        }
+      } catch (e) {}
+    }
+
+    async function openQrModal() {
+      await loadTgInfo();
+      document.getElementById('qr-modal').style.display = 'flex';
+    }
+
+    function closeQrModal() {
+      document.getElementById('qr-modal').style.display = 'none';
+    }
+
+    async function openTelegramLink() {
+      try {
+        const info = await invoke('get_tg_info');
+        await invoke('open_external_url', { url: info.link });
+      } catch (e) {
+        showToast('Не удалось открыть ссылку: ' + e, true);
+      }
+    }
+
+    async function copyTelegramLink() {
+      try {
+        const info = await invoke('get_tg_info');
+        const link = info.link;
+        try {
+          await invoke('copy_to_clipboard', { text: link });
+          showToast('Ссылка Telegram скопирована в буфер обмена');
+          return;
+        } catch (rustErr) {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(link);
+            showToast('Ссылка Telegram скопирована в буфер обмена');
+            return;
+          }
+          throw rustErr;
+        }
+      } catch (e) {
+        showToast('Ошибка копирования: ' + e, true);
+      }
+    }
+
+    async function openExternal(url) {
+      try {
+        await invoke('open_external_url', { url });
+      } catch (e) {}
+    }
+
+    function toggleLogsAutoRefresh(enabled) {
+      appState.logsAutoRefresh = !!enabled;
+      if (enabled) refreshLogs(false);
+    }
+
+    async function refreshLogs(forceScroll = false) {
+      try {
+        const logs = await invoke('get_recent_logs', { lines: 120 });
+        appState.logs = logs;
+        renderLogs(forceScroll);
+      } catch (e) {}
+    }
+
+    function setLogFilter(filter) {
+      appState.currentLogFilter = filter;
+      document.querySelectorAll('.filter-btn').forEach(b => {
+        const label = b.textContent.trim();
+        b.classList.toggle('active', (filter === 'ALL' && label === 'Все') || label === filter);
+      });
+      renderLogs(true);
+    }
+
+    let lastRenderedLogsKey = '';
+    function renderLogs(forceScroll = false) {
+      const filtered = appState.logs.filter(l => appState.currentLogFilter === 'ALL' || l.level === appState.currentLogFilter);
+      const tail = filtered.length > 0 ? filtered[filtered.length - 1] : null;
+      const key = appState.currentLogFilter + ':' + filtered.length + ':' + (tail ? (tail.timestamp + tail.message) : '');
+      if (!forceScroll && key === lastRenderedLogsKey) {
+        return;
+      }
+      lastRenderedLogsKey = key;
+
+      const screen = document.getElementById('terminal-screen');
+      const wasAtBottom = (screen.scrollHeight - screen.scrollTop - screen.clientHeight) < 40;
+
+      const frag = document.createDocumentFragment();
+      filtered.forEach(log => {
+        const line = document.createElement('div');
+        line.className = 'log-line';
+        const timeText = (log.timestamp || '').length >= 19 ? log.timestamp.slice(11, 19) : log.timestamp;
+        line.innerHTML = `
+          <span class="log-time">${escapeHtml(timeText)}</span>
+          <span class="log-svc">[${escapeHtml(log.service)}]</span>
+          <span class="log-lvl-${escapeHtml(log.level)}">[${escapeHtml(log.level)}]</span>
+          <span class="log-msg">${escapeHtml(log.message)}</span>
+        `;
+        frag.appendChild(line);
+      });
+
+      screen.innerHTML = '';
+      screen.appendChild(frag);
+
+      if (forceScroll || wasAtBottom) {
+        screen.scrollTop = screen.scrollHeight;
+      }
+    }
+
+    function clearLogsScreen() {
+      document.getElementById('terminal-screen').innerHTML = '';
+      appState.logs = [];
+      lastRenderedLogsKey = '';
+    }
+
+    function highlightDnsButton(mode) {
+      ['system', 'cloudflare', 'google', 'quad9', 'adguard'].forEach(m => {
+        const el = document.getElementById('dns-' + m);
+        const badge = document.getElementById('dns-badge-' + m);
+        const active = m === mode;
+        if (el) el.classList.toggle('active-dns', active);
+        if (badge) {
+          badge.classList.toggle('active', active);
+          badge.textContent = active ? 'Активен' : 'Выбрать';
+        }
+      });
+    }
+
+    async function selectDns(mode) {
+      try {
+        await invoke('set_dns', { mode });
+        highlightDnsButton(mode);
+        showToast('DNS переключён на: ' + mode);
+      } catch (e) {
+        showToast('Ошибка смены DNS: ' + e, true);
+      }
+    }
+
+    async function installPolkitAction() {
+      try {
+        await invoke('install_polkit');
+        updatePolkitBadge(true);
+        await refreshStatus();
+        showToast('Правило Polkit успешно установлено');
+      } catch (e) {
+        showToast('Ошибка Polkit: ' + e, true);
+      }
+    }
+
+    function updatePolkitBadge(ready) {
+      appState.polkit_ready = !!ready;
+      const badge = document.getElementById('polkit-badge');
+      const pillDot = document.getElementById('pill-polkit-dot');
+      const pillText = document.getElementById('pill-polkit-text');
+
+      if (ready) {
+        if (badge) {
+          badge.className = 'card-badge active';
+          badge.textContent = 'Установлено';
+        }
+        if (pillDot) pillDot.className = 'status-dot active';
+        if (pillText) pillText.textContent = 'Активен';
+      } else {
+        if (badge) {
+          badge.className = 'card-badge';
+          badge.textContent = 'Не установлено';
+        }
+        if (pillDot) pillDot.className = 'status-dot warn';
+        if (pillText) pillText.textContent = 'Не настроен';
+      }
+    }
+
+    async function handleAutostartChange(checked) {
+      try {
+        await invoke('toggle_autostart', { enable: checked });
+        showToast(checked ? 'Автозапуск включён' : 'Автозапуск отключён');
+      } catch (e) {
+        showToast('Ошибка автозапуска: ' + e, true);
+      }
+    }
+
+    async function acceptDisclaimerModal() {
+      try {
+        await invoke('accept_disclaimer');
+        document.getElementById('disclaimer-modal').style.display = 'none';
+      } catch (e) {}
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function escapeAttr(str) {
+      return escapeHtml(str).replace(/"/g, '&quot;');
+    }
+
+    // Floating technical term popover logic
+    let popoverHideTimer = null;
+    function showTermPopover(targetEl, termKey) {
+      const doc = TERM_DOCS[termKey];
+      if (!doc) return;
+      if (popoverHideTimer) {
+        clearTimeout(popoverHideTimer);
+        popoverHideTimer = null;
+      }
+
+      const pop = document.getElementById('term-popover');
+      document.getElementById('term-popover-title').textContent = doc.title;
+      document.getElementById('term-popover-body').textContent = doc.body;
+      pop.style.display = 'block';
+
+      const rect = targetEl.getBoundingClientRect();
+      const popRect = pop.getBoundingClientRect();
+      let left = rect.left;
+      let top = rect.bottom + 8;
+
+      if (left + popRect.width > window.innerWidth - 12) {
+        left = window.innerWidth - popRect.width - 12;
+      }
+      if (left < 12) left = 12;
+
+      if (top + popRect.height > window.innerHeight - 12) {
+        top = rect.top - popRect.height - 8;
+      }
+      if (top < 12) top = 12;
+
+      pop.style.left = left + 'px';
+      pop.style.top = top + 'px';
+    }
+
+    function scheduleHideTermPopover() {
+      popoverHideTimer = setTimeout(() => {
+        document.getElementById('term-popover').style.display = 'none';
+      }, 150);
+    }
+
+    document.addEventListener('mouseover', (e) => {
+      const trigger = e.target.closest('.help-icon[data-term]');
+      if (trigger) {
+        showTermPopover(trigger, trigger.dataset.term);
+      }
+    });
+
+    document.addEventListener('mouseout', (e) => {
+      const trigger = e.target.closest('.help-icon[data-term]');
+      if (trigger) {
+        scheduleHideTermPopover();
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      const trigger = e.target.closest('.help-icon[data-term]');
+      if (trigger) {
+        e.stopPropagation();
+        showTermPopover(trigger, trigger.dataset.term);
+      } else if (!e.target.closest('#term-popover')) {
+        document.getElementById('term-popover').style.display = 'none';
+      }
+    });
+
+    document.getElementById('term-popover').addEventListener('mouseenter', () => {
+      if (popoverHideTimer) {
+        clearTimeout(popoverHideTimer);
+        popoverHideTimer = null;
+      }
+    });
+    document.getElementById('term-popover').addEventListener('mouseleave', scheduleHideTermPopover);
+
+    function mockInvoke(cmd) {
+      if (cmd === 'get_gui_state') return Promise.resolve({ disclaimer_accepted: true, traffic_mode: 'direct', dns_mode: 'system' });
+      if (cmd === 'get_status') return Promise.resolve({ dpi_active: true, tg_active: true, tg_port: 1443, tg_cf_enabled: true, network_profile: 'eth0', active_strategy: '--filter-tcp=80,443 --dpi-desync=fake,multisplit' });
+      if (cmd === 'get_latencies') return Promise.resolve({ youtube_ms: 42, discord_ms: 56, cloudflare_ms: 21 });
+      if (cmd === 'get_strategies') return Promise.resolve([]);
+      if (cmd === 'get_tg_info') return Promise.resolve({ link: 'tg://proxy?server=127.0.0.1&port=1443&secret=dd349cc464330a4d1a73be8471b35f0290', active: true, port: 1443 });
+      if (cmd === 'get_recent_logs') return Promise.resolve([]);
+      return Promise.resolve();
+    }
+
+    window.addEventListener('DOMContentLoaded', loadInitialState);
+  </script>
+</body>
+</html>

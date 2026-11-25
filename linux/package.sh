@@ -5,15 +5,18 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 VERSION=""
+VERSION_EXPLICIT=0
 ARCH="$(uname -m)"
 DIST_DIR="${SCRIPT_DIR}/dist"
 DO_TAR=0
 DO_DEB=0
 DO_RPM=0
+BUILD_HEADLESS=1
+BUILD_GUI=0
 
 usage() {
     cat <<'EOF'
-NetFix Linux Packaging Script
+NetFix & NetFixLinux Packaging Script
 
 Usage:
   ./linux/package.sh [options]
@@ -25,7 +28,10 @@ Options:
   --tar              Build .tar.gz archive
   --deb              Build .deb package
   --rpm              Build .rpm package
-  --all              Build all available package formats
+  --all              Build all package formats (.tar.gz, .deb, .rpm)
+  --gui              Build only NetFixLinux GUI desktop packages
+  --with-gui         Build both NetFix headless and NetFixLinux GUI packages
+  --headless         Build only NetFix headless packages (default)
   -h, --help         Show this help
 EOF
 }
@@ -35,6 +41,7 @@ while [[ $# -gt 0 ]]; do
         --version)
             [[ $# -ge 2 ]] || { echo "error: --version requires an argument" >&2; exit 2; }
             VERSION="$2"
+            VERSION_EXPLICIT=1
             shift 2
             ;;
         --arch)
@@ -63,6 +70,21 @@ while [[ $# -gt 0 ]]; do
             DO_TAR=1
             DO_DEB=1
             DO_RPM=1
+            shift
+            ;;
+        --gui)
+            BUILD_GUI=1
+            BUILD_HEADLESS=0
+            shift
+            ;;
+        --with-gui)
+            BUILD_GUI=1
+            BUILD_HEADLESS=1
+            shift
+            ;;
+        --headless)
+            BUILD_HEADLESS=1
+            BUILD_GUI=0
             shift
             ;;
         -h|--help)
@@ -110,21 +132,36 @@ esac
 
 CTL_BIN=""
 TG_BIN=""
-if [[ -x "${SCRIPT_DIR}/target/release/netfixctl" && -x "${SCRIPT_DIR}/target/release/netfix-tgproxy" ]]; then
-    CTL_BIN="${SCRIPT_DIR}/target/release/netfixctl"
-    TG_BIN="${SCRIPT_DIR}/target/release/netfix-tgproxy"
-elif [[ -x "${SCRIPT_DIR}/bin/netfixctl" && -x "${SCRIPT_DIR}/bin/netfix-tgproxy" ]]; then
-    CTL_BIN="${SCRIPT_DIR}/bin/netfixctl"
-    TG_BIN="${SCRIPT_DIR}/bin/netfix-tgproxy"
-else
-    echo "error: release binaries not found at target/release/ or bin/. Build them first." >&2
-    exit 1
+if [[ "${BUILD_HEADLESS}" -eq 1 ]]; then
+    if [[ -x "${SCRIPT_DIR}/target/release/netfixctl" && -x "${SCRIPT_DIR}/target/release/netfix-tgproxy" ]]; then
+        CTL_BIN="${SCRIPT_DIR}/target/release/netfixctl"
+        TG_BIN="${SCRIPT_DIR}/target/release/netfix-tgproxy"
+    elif [[ -x "${SCRIPT_DIR}/bin/netfixctl" && -x "${SCRIPT_DIR}/bin/netfix-tgproxy" ]]; then
+        CTL_BIN="${SCRIPT_DIR}/bin/netfixctl"
+        TG_BIN="${SCRIPT_DIR}/bin/netfix-tgproxy"
+    else
+        echo "error: headless release binaries not found at target/release/ or bin/. Build them first." >&2
+        exit 1
+    fi
+fi
+
+GUI_BIN=""
+if [[ "${BUILD_GUI}" -eq 1 ]]; then
+    if [[ -x "${SCRIPT_DIR}/target/release/netfixlinux-gui" ]]; then
+        GUI_BIN="${SCRIPT_DIR}/target/release/netfixlinux-gui"
+    elif [[ -x "${SCRIPT_DIR}/bin/netfixlinux-gui" ]]; then
+        GUI_BIN="${SCRIPT_DIR}/bin/netfixlinux-gui"
+    else
+        echo "error: netfixlinux-gui release binary not found at target/release/ or bin/. Build it first." >&2
+        exit 1
+    fi
 fi
 
 mkdir -p "${DIST_DIR}"
 BUILD_TMP="$(mktemp -d -t netfix-pkg-XXXXXX)"
 trap 'rm -rf "${BUILD_TMP}"' EXIT
 
+if [[ "${BUILD_HEADLESS}" -eq 1 ]]; then
 echo "=== Packaging NetFix v${VERSION} (${PKG_ARCH}) ==="
 echo "Output directory: ${DIST_DIR}"
 
@@ -396,12 +433,183 @@ EOF
         echo "--> Skipping .rpm (rpmbuild not found)"
     fi
 fi
+fi # End of BUILD_HEADLESS
+
+# === NetFixLinux GUI Packaging ===
+if [[ "${BUILD_GUI}" -eq 1 ]]; then
+    if [[ "${VERSION_EXPLICIT}" -eq 1 ]]; then
+        GUI_VERSION="${VERSION}"
+    else
+        GUI_VERSION=$(grep -m1 '^version = ' "${SCRIPT_DIR}/crates/netfixlinux-gui/Cargo.toml" | cut -d'"' -f2 || true)
+        [[ -n "${GUI_VERSION}" ]] || GUI_VERSION="${VERSION}"
+    fi
+    GUI_VERSION="${GUI_VERSION#v}"
+
+    echo "=== Packaging NetFixLinux GUI v${GUI_VERSION} (${PKG_ARCH}) ==="
+    echo "Output directory: ${DIST_DIR}"
+
+    # 1. Build GUI .tar.gz
+    if [[ "${DO_TAR}" -eq 1 ]]; then
+        echo "--> Building NetFixLinux tar.gz release bundle..."
+        TAR_DIR_NAME="netfixlinux-v${GUI_VERSION}-linux-${PKG_ARCH}"
+        TAR_STAGE="${BUILD_TMP}/${TAR_DIR_NAME}"
+        mkdir -p "${TAR_STAGE}/bin" \
+                 "${TAR_STAGE}/share/applications" \
+                 "${TAR_STAGE}/share/polkit-1/actions" \
+                 "${TAR_STAGE}/share/icons/hicolor/32x32/apps" \
+                 "${TAR_STAGE}/share/icons/hicolor/128x128/apps" \
+                 "${TAR_STAGE}/share/icons/hicolor/512x512/apps"
+
+        cp -p "${GUI_BIN}" "${TAR_STAGE}/bin/netfixlinux-gui"
+        cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/assets/dev.flyingbober.netfixlinux.desktop" "${TAR_STAGE}/share/applications/"
+        cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/assets/dev.flyingbober.netfixlinux.policy" "${TAR_STAGE}/share/polkit-1/actions/"
+        cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/icons/32x32.png" "${TAR_STAGE}/share/icons/hicolor/32x32/apps/dev.flyingbober.netfixlinux.png"
+        cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/icons/128x128.png" "${TAR_STAGE}/share/icons/hicolor/128x128/apps/dev.flyingbober.netfixlinux.png"
+        cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/icons/512x512.png" "${TAR_STAGE}/share/icons/hicolor/512x512/apps/dev.flyingbober.netfixlinux.png"
+
+        TAR_FILE="${DIST_DIR}/netfixlinux-v${GUI_VERSION}-linux-${PKG_ARCH}.tar.gz"
+        tar -czf "${TAR_FILE}" -C "${BUILD_TMP}" "${TAR_DIR_NAME}"
+        echo "    Created: ${TAR_FILE}"
+    fi
+
+    # 2. Build GUI .deb
+    if [[ "${DO_DEB}" -eq 1 ]]; then
+        if command -v dpkg-deb >/dev/null 2>&1; then
+            echo "--> Building NetFixLinux .deb package (dpkg-deb)..."
+            DEB_STAGE="${BUILD_TMP}/deb_stage_gui"
+            mkdir -p "${DEB_STAGE}/DEBIAN" \
+                     "${DEB_STAGE}/usr/bin" \
+                     "${DEB_STAGE}/usr/share/applications" \
+                     "${DEB_STAGE}/usr/share/polkit-1/actions" \
+                     "${DEB_STAGE}/usr/share/icons/hicolor/32x32/apps" \
+                     "${DEB_STAGE}/usr/share/icons/hicolor/128x128/apps" \
+                     "${DEB_STAGE}/usr/share/icons/hicolor/512x512/apps" \
+                     "${DEB_STAGE}/usr/share/doc/netfixlinux"
+
+            cp -p "${GUI_BIN}" "${DEB_STAGE}/usr/bin/netfixlinux-gui"
+            cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/assets/dev.flyingbober.netfixlinux.desktop" "${DEB_STAGE}/usr/share/applications/"
+            cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/assets/dev.flyingbober.netfixlinux.policy" "${DEB_STAGE}/usr/share/polkit-1/actions/"
+            cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/icons/32x32.png" "${DEB_STAGE}/usr/share/icons/hicolor/32x32/apps/dev.flyingbober.netfixlinux.png"
+            cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/icons/128x128.png" "${DEB_STAGE}/usr/share/icons/hicolor/128x128/apps/dev.flyingbober.netfixlinux.png"
+            cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/icons/512x512.png" "${DEB_STAGE}/usr/share/icons/hicolor/512x512/apps/dev.flyingbober.netfixlinux.png"
+
+            chmod 0755 "${DEB_STAGE}/usr/bin/netfixlinux-gui"
+            chmod 0644 "${DEB_STAGE}/usr/share/applications/"* \
+                       "${DEB_STAGE}/usr/share/polkit-1/actions/"* \
+                       "${DEB_STAGE}/usr/share/icons/hicolor/"*"/apps/"*
+
+            cat <<EOF > "${DEB_STAGE}/DEBIAN/control"
+Package: netfixlinux
+Version: ${GUI_VERSION}
+Section: net
+Priority: optional
+Architecture: ${DEB_ARCH}
+Maintainer: NetFixLinux Team <support@netfixlinux.dev>
+Depends: libgtk-3-0, libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37, libayatana-appindicator3-1 | libappindicator3-1
+Suggests: netfix
+Description: NetFixLinux Desktop Client
+ Desktop GUI client for DPI bypass and Telegram proxy (fork of NetFix Mobile by rupleide).
+EOF
+            DEB_FILE="${DIST_DIR}/netfixlinux_${GUI_VERSION}_${DEB_ARCH}.deb"
+            dpkg-deb --build "${DEB_STAGE}" "${DEB_FILE}" >/dev/null
+            echo "    Created: ${DEB_FILE}"
+        else
+            echo "--> Skipping NetFixLinux .deb (dpkg-deb not found)"
+        fi
+    fi
+
+    # 3. Build GUI .rpm
+    if [[ "${DO_RPM}" -eq 1 ]]; then
+        if command -v rpmbuild >/dev/null 2>&1; then
+            echo "--> Building NetFixLinux .rpm package (rpmbuild)..."
+            RPM_TOP="${BUILD_TMP}/rpmbuild_gui"
+            mkdir -p "${RPM_TOP}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+            RPM_STAGE="${BUILD_TMP}/rpm_stage_gui"
+
+            mkdir -p "${RPM_STAGE}/usr/bin" \
+                     "${RPM_STAGE}/usr/share/applications" \
+                     "${RPM_STAGE}/usr/share/polkit-1/actions" \
+                     "${RPM_STAGE}/usr/share/icons/hicolor/32x32/apps" \
+                     "${RPM_STAGE}/usr/share/icons/hicolor/128x128/apps" \
+                     "${RPM_STAGE}/usr/share/icons/hicolor/512x512/apps"
+
+            cp -p "${GUI_BIN}" "${RPM_STAGE}/usr/bin/netfixlinux-gui"
+            cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/assets/dev.flyingbober.netfixlinux.desktop" "${RPM_STAGE}/usr/share/applications/"
+            cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/assets/dev.flyingbober.netfixlinux.policy" "${RPM_STAGE}/usr/share/polkit-1/actions/"
+            cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/icons/32x32.png" "${RPM_STAGE}/usr/share/icons/hicolor/32x32/apps/dev.flyingbober.netfixlinux.png"
+            cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/icons/128x128.png" "${RPM_STAGE}/usr/share/icons/hicolor/128x128/apps/dev.flyingbober.netfixlinux.png"
+            cp -p "${SCRIPT_DIR}/crates/netfixlinux-gui/icons/512x512.png" "${RPM_STAGE}/usr/share/icons/hicolor/512x512/apps/dev.flyingbober.netfixlinux.png"
+
+            chmod 0755 "${RPM_STAGE}/usr/bin/netfixlinux-gui"
+            chmod 0644 "${RPM_STAGE}/usr/share/applications/"* \
+                       "${RPM_STAGE}/usr/share/polkit-1/actions/"* \
+                       "${RPM_STAGE}/usr/share/icons/hicolor/"*"/apps/"*
+
+            tar -czf "${RPM_TOP}/SOURCES/netfixlinux-${GUI_VERSION}.tar.gz" -C "${RPM_STAGE}" .
+
+            SPEC_FILE="${RPM_TOP}/SPECS/netfixlinux.spec"
+            cat <<EOF > "${SPEC_FILE}"
+%global debug_package %{nil}
+%define _build_id_links none
+
+Name:           netfixlinux
+Version:        ${GUI_VERSION}
+Release:        1%{?dist}
+Summary:        NetFixLinux Desktop Client
+License:        MIT or Apache-2.0
+URL:            https://github.com/FlyingBober/NetFixMobile
+Source0:        netfixlinux-${GUI_VERSION}.tar.gz
+
+Requires:       gtk3, (webkit2gtk4.1 or webkit2gtk3), (libayatana-appindicator-gtk3 or libappindicator-gtk3)
+Suggests:       netfix
+
+%description
+NetFixLinux Desktop Client (fork of NetFix Mobile by rupleide).
+Features DPI bypass management, rootless system proxy toggle, TUN interface,
+Telegram proxy with QR code, and live Nekoray-style log console.
+
+%prep
+%setup -c -T
+tar -xzf %{SOURCE0}
+
+%build
+
+%install
+rm -rf %{buildroot}
+mkdir -p %{buildroot}
+cp -a * %{buildroot}/
+
+%files
+/usr/bin/netfixlinux-gui
+/usr/share/applications/dev.flyingbober.netfixlinux.desktop
+/usr/share/polkit-1/actions/dev.flyingbober.netfixlinux.policy
+/usr/share/icons/hicolor/32x32/apps/dev.flyingbober.netfixlinux.png
+/usr/share/icons/hicolor/128x128/apps/dev.flyingbober.netfixlinux.png
+/usr/share/icons/hicolor/512x512/apps/dev.flyingbober.netfixlinux.png
+
+%changelog
+* Sun Nov 22 2026 NetFixLinux Team <support@netfixlinux.dev> - ${GUI_VERSION}-1
+- Initial release of NetFixLinux Desktop Client
+EOF
+
+            rpmbuild --target "${RPM_ARCH}" -bb --define "_topdir ${RPM_TOP}" "${SPEC_FILE}" >/dev/null
+            GENERATED_RPM=$(find "${RPM_TOP}/RPMS" -name "*.rpm" -type f | head -n1)
+            if [[ -f "${GENERATED_RPM}" ]]; then
+                RPM_DEST="${DIST_DIR}/netfixlinux-${GUI_VERSION}-1.${RPM_ARCH}.rpm"
+                mv "${GENERATED_RPM}" "${RPM_DEST}"
+                echo "    Created: ${RPM_DEST}"
+            fi
+        else
+            echo "--> Skipping NetFixLinux .rpm (rpmbuild not found)"
+        fi
+    fi
+fi
 
 # 4. Generate SHA256SUMS
 echo "--> Generating SHA256 checksums..."
 (
     cd "${DIST_DIR}"
-    sha256sum netfix* > SHA256SUMS.txt 2>/dev/null || true
+    sha256sum netfix* netfixlinux* > SHA256SUMS.txt 2>/dev/null || true
 )
 echo "    Created: ${DIST_DIR}/SHA256SUMS.txt"
 echo

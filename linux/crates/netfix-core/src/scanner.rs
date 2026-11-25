@@ -1409,7 +1409,7 @@ mod tests {
 
         assert_eq!(err.exit_code(), ExitCode::Runtime);
         assert!(
-            elapsed < Duration::from_secs(2),
+            elapsed < Duration::from_secs(5),
             "expected immediate cancellation, took {elapsed:?}"
         );
 

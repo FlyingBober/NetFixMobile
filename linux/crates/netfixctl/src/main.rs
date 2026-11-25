@@ -143,6 +143,11 @@ pub enum Commands {
         #[arg(long)]
         apply: bool,
     },
+    /// Apply custom DPI strategy arguments to current network profile and start/restart DPI
+    Apply {
+        #[arg(value_name = "ARGS")]
+        args: String,
+    },
     /// Probe Telegram DC1-DC5 and Cloudflare proxy domains
     DcCheck,
     /// Manage network-specific strategy profiles and inspect current network
@@ -414,6 +419,25 @@ async fn dispatch(cli: Cli) -> Result<(), NetfixError> {
                 json,
             )
             .await?;
+        }
+        Commands::Apply { args } => {
+            if args.trim().is_empty() {
+                return Err(NetfixError::InvalidInput("strategy args cannot be empty".into()));
+            }
+            let (mut cfg, _) = load_config_for_inspection(&config_path, explicit_config)?;
+            let engine = cfg.dpi.engine;
+            apply_winning_strategy(&mut cfg, engine, &args);
+            cfg.save(&config_path)?;
+            if is_systemd_unit_active(DPI_SERVICE) {
+                run_systemctl(&["restart", DPI_SERVICE])?;
+            } else {
+                run_systemctl(&["start", DPI_SERVICE])?;
+            }
+            if json {
+                print_json(&serde_json::json!({ "ok": true, "strategy": args }))?;
+            } else {
+                println!("Applied strategy: {args}");
+            }
         }
         Commands::DcCheck => {
             let (cfg, _) = load_config_for_inspection(&config_path, explicit_config)?;

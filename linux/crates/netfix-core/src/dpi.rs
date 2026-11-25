@@ -116,7 +116,18 @@ impl DpiRunner {
         cmd.stdin(Stdio::null());
         cmd.kill_on_drop(true);
 
-        let child = match cmd.spawn() {
+        let mut spawn_res = cmd.spawn();
+        // Mitigate Linux ETXTBSY races when another test thread forks while a temp script FD is open.
+        for _ in 0..10 {
+            match &spawn_res {
+                Err(err) if err.raw_os_error() == Some(libc::ETXTBSY) => {
+                    std::thread::sleep(Duration::from_millis(10));
+                    spawn_res = cmd.spawn();
+                }
+                _ => break,
+            }
+        }
+        let child = match spawn_res {
             Ok(child) => child,
             Err(err) => {
                 drop(firewall);
