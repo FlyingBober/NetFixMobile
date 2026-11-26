@@ -96,6 +96,8 @@ jobs:
       - name: Build Release Binaries
         shell: bash
         working-directory: linux
+        env:
+          NETFIX_APP_VERSION: ${{ steps.version.outputs.raw }}
         run: |
           cargo build --release --locked --target ${{ matrix.target }} -p netfixctl -p netfix-tgproxy
           mkdir -p target/release

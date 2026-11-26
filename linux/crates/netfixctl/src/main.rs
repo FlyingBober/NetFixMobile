@@ -230,6 +230,19 @@ pub enum TgAction {
         #[arg(value_name = "DOMAIN_OR_AUTO")]
         domain: String,
     },
+    /// Configure Cloudflare Fronting settings for Telegram Proxy
+    Cf {
+        #[arg(long)]
+        enabled: Option<bool>,
+        #[arg(long)]
+        priority: Option<bool>,
+        #[arg(long)]
+        plain_first: Option<bool>,
+        #[arg(long, value_name = "DOMAIN_OR_AUTO")]
+        pin_domain: Option<String>,
+        #[arg(long, value_name = "IP1,IP2|clear")]
+        front_ips: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,7 +291,10 @@ pub struct TgStatusSummary {
     pub bind_ip: String,
     pub port: u16,
     pub cf_enabled: bool,
+    pub cf_priority: bool,
+    pub cf_plain_first: bool,
     pub pinned_cf_domain: String,
+    pub cf_front_ips: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -751,7 +767,10 @@ fn build_status_report_with_querier(
         bind_ip: cfg.tgproxy.bind_ip.clone(),
         port: cfg.tgproxy.port,
         cf_enabled: cfg.tgproxy.cf_enabled,
+        cf_priority: cfg.tgproxy.cf_priority,
+        cf_plain_first: cfg.tgproxy.cf_plain_first,
         pinned_cf_domain: cfg.tgproxy.pinned_cf_domain.clone(),
+        cf_front_ips: cfg.tgproxy.cf_front_ips.clone(),
     });
 
     let network = detect_current_network_info(cfg);
@@ -1035,8 +1054,78 @@ fn handle_tg(
                 println!("Pinned Cloudflare domain: {normalized}");
             }
         }
+        TgAction::Cf {
+            enabled,
+            priority,
+            plain_first,
+            pin_domain,
+            front_ips,
+        } => {
+            if let Some(v) = enabled {
+                cfg.tgproxy.cf_enabled = v;
+            }
+            if let Some(v) = priority {
+                cfg.tgproxy.cf_priority = v;
+            }
+            if let Some(v) = plain_first {
+                cfg.tgproxy.cf_plain_first = v;
+            }
+            if let Some(ref domain) = pin_domain {
+                cfg.tgproxy.pinned_cf_domain = parse_pin_cf_domain(domain)?;
+            }
+            if let Some(ref raw_ips) = front_ips {
+                cfg.tgproxy.cf_front_ips = parse_cf_front_ips(raw_ips)?;
+            }
+            cfg.save(config_path)?;
+            if json {
+                print_json(&serde_json::json!({
+                    "cf_enabled": cfg.tgproxy.cf_enabled,
+                    "cf_priority": cfg.tgproxy.cf_priority,
+                    "cf_plain_first": cfg.tgproxy.cf_plain_first,
+                    "pinned_cf_domain": cfg.tgproxy.pinned_cf_domain,
+                    "cf_front_ips": cfg.tgproxy.cf_front_ips,
+                }))?;
+            } else {
+                println!(
+                    "Cloudflare Fronting updated: enabled={}, priority={}, plain_first={}, pinned={}, front_ips={:?}",
+                    cfg.tgproxy.cf_enabled,
+                    cfg.tgproxy.cf_priority,
+                    cfg.tgproxy.cf_plain_first,
+                    if cfg.tgproxy.pinned_cf_domain.is_empty() {
+                        "auto"
+                    } else {
+                        &cfg.tgproxy.pinned_cf_domain
+                    },
+                    cfg.tgproxy.cf_front_ips
+                );
+            }
+        }
     }
     Ok(())
+}
+
+fn parse_cf_front_ips(raw: &str) -> Result<Vec<String>, NetfixError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("clear") || trimmed.eq_ignore_ascii_case("none") {
+        return Ok(Vec::new());
+    }
+    let mut ips = Vec::new();
+    for part in trimmed.split(',') {
+        let candidate = part.trim();
+        if candidate.is_empty() {
+            continue;
+        }
+        let parsed: IpAddr = candidate.parse().map_err(|_| {
+            NetfixError::InvalidInput(format!(
+                "invalid Cloudflare front IP '{candidate}' (expected IPv4/IPv6)"
+            ))
+        })?;
+        let norm = parsed.to_string();
+        if !ips.contains(&norm) {
+            ips.push(norm);
+        }
+    }
+    Ok(ips)
 }
 
 fn build_tg_link(
@@ -1410,6 +1499,38 @@ mod tests {
                 action: TgAction::PinCf { .. }
             }
         ));
+
+        let tg_cf = Cli::try_parse_from([
+            "netfixctl",
+            "tg",
+            "cf",
+            "--enabled",
+            "false",
+            "--priority",
+            "true",
+            "--pin-domain",
+            "custom.co.uk",
+            "--front-ips",
+            "104.21.0.1,172.67.0.1",
+        ])
+        .unwrap();
+        assert!(matches!(
+            tg_cf.command,
+            Commands::Tg {
+                action: TgAction::Cf {
+                    enabled: Some(false),
+                    priority: Some(true),
+                    ..
+                }
+            }
+        ));
+
+        assert_eq!(
+            parse_cf_front_ips("104.21.0.1, 172.67.0.1, 104.21.0.1").unwrap(),
+            vec!["104.21.0.1".to_string(), "172.67.0.1".to_string()]
+        );
+        assert!(parse_cf_front_ips("clear").unwrap().is_empty());
+        assert!(parse_cf_front_ips("not-an-ip").is_err());
 
         assert!(matches!(
             Cli::try_parse_from(["netfixctl", "dpi-run"]).unwrap().command,

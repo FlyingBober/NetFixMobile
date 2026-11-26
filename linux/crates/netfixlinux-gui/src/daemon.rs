@@ -17,6 +17,9 @@ pub struct AppStatus {
     pub tg_enabled: bool,
     pub tg_port: u16,
     pub tg_cf_enabled: bool,
+    pub tg_cf_priority: bool,
+    pub tg_pinned_cf_domain: String,
+    pub tg_cf_front_ips: Vec<String>,
     pub dns_mode: String,
     pub system_proxy_active: bool,
     pub polkit_ready: bool,
@@ -200,6 +203,9 @@ pub fn get_app_status() -> AppStatus {
     let mut dns_mode = crate::state::load_state().dns_mode;
     let mut tg_port = 1443;
     let mut tg_cf_enabled = true;
+    let mut tg_cf_priority = true;
+    let mut tg_pinned_cf_domain = String::new();
+    let mut tg_cf_front_ips: Vec<String> = Vec::new();
 
     if let Some(val) = query_netfixctl_status(polkit_ready) {
         if let Some(dpi) = val.get("dpi") {
@@ -221,6 +227,18 @@ pub fn get_app_status() -> AppStatus {
             }
             if let Some(cf) = tg.get("cf_enabled").and_then(|v| v.as_bool()) {
                 tg_cf_enabled = cf;
+            }
+            if let Some(prio) = tg.get("cf_priority").and_then(|v| v.as_bool()) {
+                tg_cf_priority = prio;
+            }
+            if let Some(pin) = tg.get("pinned_cf_domain").and_then(|v| v.as_str()) {
+                tg_pinned_cf_domain = pin.to_string();
+            }
+            if let Some(ips) = tg.get("cf_front_ips").and_then(|v| v.as_array()) {
+                tg_cf_front_ips = ips
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
             }
         }
         if let Some(net) = val.get("network") {
@@ -263,6 +281,9 @@ pub fn get_app_status() -> AppStatus {
         tg_enabled: tg_active,
         tg_port,
         tg_cf_enabled,
+        tg_cf_priority,
+        tg_pinned_cf_domain,
+        tg_cf_front_ips,
         dns_mode,
         system_proxy_active,
         polkit_ready,
@@ -327,7 +348,62 @@ pub fn get_tg_link() -> Result<String, String> {
             }
         }
     }
-    Ok("tg://proxy?server=127.0.0.1&port=1443&secret=dd349cc464330a4d1a73be8471b35f0290".to_string())
+    if !is_effective_root() && crate::tun::is_polkit_installed() {
+        if let Ok(out) = Command::new("pkexec")
+            .args(["--disable-internal-agent", &ctl, "tg", "link"])
+            .output()
+        {
+            if out.status.success() {
+                let link = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if link.starts_with("tg://") {
+                    return Ok(link);
+                }
+            }
+        }
+    }
+    Err("Не удалось получить ссылку Telegram Proxy: установите правило Polkit в Настройках или выполните sudo netfixctl tg link".to_string())
+}
+
+pub fn set_tg_cf_config(
+    enabled: bool,
+    priority: bool,
+    pin_domain: &str,
+    front_ips: &str,
+) -> Result<(), String> {
+    let enabled_str = if enabled { "true" } else { "false" };
+    let priority_str = if priority { "true" } else { "false" };
+    let pin_arg = if pin_domain.trim().is_empty() {
+        "auto"
+    } else {
+        pin_domain.trim()
+    };
+    let ips_arg = if front_ips.trim().is_empty() {
+        "clear"
+    } else {
+        front_ips.trim()
+    };
+    run_netfixctl_privileged(&[
+        "tg",
+        "cf",
+        "--enabled",
+        enabled_str,
+        "--priority",
+        priority_str,
+        "--pin-domain",
+        pin_arg,
+        "--front-ips",
+        ips_arg,
+    ])?;
+
+    let tg_active = Command::new("systemctl")
+        .args(["is-active", "netfix-tgproxy.service"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "active")
+        .unwrap_or(false);
+    if tg_active {
+        run_netfixctl_privileged(&["restart", "tg"])?;
+    }
+    Ok(())
 }
 
 /// Complete preset list synced 1:1 with linux/presets/strategies-nfqws.toml

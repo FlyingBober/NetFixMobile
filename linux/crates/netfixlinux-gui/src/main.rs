@@ -50,13 +50,18 @@ struct SharedScanState {
     child_pid: Arc<Mutex<Option<u32>>>,
 }
 
+const APP_VERSION: &str = match option_env!("NETFIX_APP_VERSION") {
+    Some(v) if !v.is_empty() => v,
+    _ => env!("CARGO_PKG_VERSION"),
+};
+
 #[tauri::command]
 fn get_app_info() -> AppInfo {
     AppInfo {
         name: "NetFixLinux".to_string(),
-        version: "0.1.0".to_string(),
+        version: APP_VERSION.to_string(),
         identifier: "dev.flyingbober.netfixlinux".to_string(),
-        attribution: "NetFixLinux — (fork of NetFix Mobile by rupleide)".to_string(),
+        attribution: format!("NetFixLinux v{APP_VERSION} — (fork of NetFix Mobile by rupleide)"),
     }
 }
 
@@ -378,7 +383,28 @@ async fn get_tg_info() -> Result<serde_json::Value, String> {
             "active": status.tg_active,
             "port": status.tg_port,
             "cf_enabled": status.tg_cf_enabled,
+            "cf_priority": status.tg_cf_priority,
+            "pinned_cf_domain": status.tg_pinned_cf_domain,
+            "cf_front_ips": status.tg_cf_front_ips,
         }))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+}
+
+#[tauri::command]
+async fn set_tg_cf_config(
+    enabled: bool,
+    priority: bool,
+    pin_domain: String,
+    front_ips: String,
+) -> Result<daemon::AppStatus, String> {
+    tokio::task::spawn_blocking(move || -> Result<daemon::AppStatus, String> {
+        if !tun::is_polkit_installed() {
+            tun::install_polkit_policy()?;
+        }
+        daemon::set_tg_cf_config(enabled, priority, &pin_domain, &front_ips)?;
+        Ok(daemon::get_app_status())
     })
     .await
     .map_err(|e| format!("Task join error: {e}"))?
@@ -525,6 +551,11 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .manage(shared_scan)
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_title(&format!(
+                    "NetFixLinux v{APP_VERSION} — (fork of NetFix Mobile by rupleide)"
+                ));
+            }
             let quit_i = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
             let show_i = MenuItem::with_id(app, "show", "Открыть NetFixLinux", true, None::<&str>)?;
             let toggle_i =
@@ -609,6 +640,7 @@ fn main() {
             get_scan_status,
             cancel_auto_scan,
             get_tg_info,
+            set_tg_cf_config,
             toggle_tg_service,
             set_dns,
             get_latencies,
