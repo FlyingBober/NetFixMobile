@@ -18,3 +18,4 @@ linux/dist/
 linux/crates/*/gen/
 native/tgproxy-rust/target/
 .superpowers/
+docs/superpowers/
